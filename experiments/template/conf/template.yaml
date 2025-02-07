@@ -1,0 +1,17 @@
+data:
+  train_data:
+    _target_: datasets.template.load_template_dataset
+    dataset_type: train
+  val_data:
+    _target_: datasets.template.load_template_dataset
+    dataset_type: val
+  test_data:
+    _target_: datasets.template.load_template_dataset
+    dataset_type: test
+
+opt:
+  _target_: torch.optim.Adam
+  lr: 1.e-5
+
+model:
+  _target_: "models.template.template.make_model"
