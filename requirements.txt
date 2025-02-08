@@ -13,11 +13,15 @@ pygraphviz
 pyvis
 scikit-learn
 interpret
+xgboost
 torch
 tensordict
 lightning
 torchmetrics
 tensorboard
+swig
+gymnasium
+torchrl
 matplotlib
 ipykernel
 ipywidgets
