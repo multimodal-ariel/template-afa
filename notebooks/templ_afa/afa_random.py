@@ -145,7 +145,7 @@ def run_one_episode(
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     init_fidx: int,
     allfcombs_l: list[tuple[int, ...]],
-) -> th.Tensor:
+) -> tuple[th.Tensor, tuple[int, ...]]:
     fobsd_l: list[int] = [init_fidx]
     fcomb: tuple[int, ...] | None = None
     # repeat feature acquisition until all features in template has been acquired.
@@ -170,7 +170,7 @@ def run_one_episode(
     acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
     acts[0, fcomb] = 1
     pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
-    return pyhats[0]
+    return pyhats[0], fcomb
 
 
 # %%
@@ -198,7 +198,7 @@ metrics_func = thm.MetricCollection(
 
 # %%
 for _data in vcube:
-    _pyhat: th.Tensor = run_one_episode(
+    _pyhat, _ = run_one_episode(
         x=_data["xs"],
         classifier=classifier,
         init_fidx=init_fidx,
