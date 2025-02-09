@@ -22,6 +22,7 @@ tensorboard
 swig
 gymnasium
 torchrl
+tabulate
 matplotlib
 ipykernel
 ipywidgets
