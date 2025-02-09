@@ -7,6 +7,7 @@ from typing import Any, Callable, Literal
 import mydatasets.aaco
 import mymodels.classifiers
 import numpy as np
+import pandas as pd
 import sklearn.base as skl_base
 import tensordict as thd
 import torch as th
@@ -154,6 +155,9 @@ def run_one_episode(
         _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
         # ident. unacquired features
         _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
+        if len(_tmp_fcomb) == 0:
+            fcomb = _tmpl_fcomb
+            break
         # randomly choose a feature to acquire
         _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
         # add acquired feature to fcomb
@@ -204,5 +208,6 @@ for _data in vcube:
         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
     )
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+print(pd.Series(metrics_d))
 
 # %%
