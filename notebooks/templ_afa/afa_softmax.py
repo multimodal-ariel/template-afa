@@ -243,17 +243,18 @@ def make_init_queries(
 
 
 def _collate_fn(
-    xp: thd.TensorDict,
+    bxp: thd.TensorDict,
     n_covs: int,
     init_fidx: int,
 ) -> thd.TensorDict:
-    _nms: th.Tensor = th.randint(0, 2, (n_covs,))
-    _nms[init_fidx] = 1
-    _nms = th.cat((_nms, _nms))
-    sinp: th.Tensor = xp["sinps"] * _nms
-    nxp: thd.TensorDict = xp.clone()
-    nxp["sinps"] = sinp
-    return nxp
+    bsz: int = bxp.batch_size[0]
+    bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs))
+    bnms[:, init_fidx] = 1
+    bnms = th.cat((bnms, bnms), dim=1)
+    bsinp: th.Tensor = bxp["sinps"] * bnms
+    bnxp: thd.TensorDict = bxp.clone()
+    bnxp["sinps"] = bsinp
+    return bnxp
 
 
 class _TrainState(TypedDict):
@@ -313,8 +314,8 @@ def fit(
     tloader = th_data.DataLoader(
         xps,
         batch_size=bsz,
-        collate_fn=lambda xp: _collate_fn(
-            xp, n_covs=tstate["selector"].n_covs, init_fidx=init_fidx
+        collate_fn=lambda bxp: _collate_fn(
+            bxp, n_covs=tstate["selector"].n_covs, init_fidx=init_fidx
         ),
     )
     pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
@@ -431,7 +432,7 @@ xps = make_init_queries(
 plf = pl.Fabric(accelerator="cpu")
 
 # %%
-mymodels.nn.make_fcn(
+nnet = mymodels.nn.make_fcn(
     in_features=2 * tcube["xs"].shape[1],
     out_features=n_templates,
     layer_specs=[
@@ -442,14 +443,7 @@ mymodels.nn.make_fcn(
 selector = SoftmaxSelector(
     n_covs=n_covs,
     n_templates=n_templates,
-    nnet=mymodels.nn.make_fcn(
-        in_features=2 * tcube["xs"].shape[1],
-        out_features=len(allfcombs_l),
-        layer_specs=[
-            (tcube["xs"].shape[1], None, None, None),
-            (tcube["xs"].shape[1], None, None, None),
-        ],
-    ),
+    nnet=nnet,
 )
 opt = th.optim.Adam(selector.parameters())
 
