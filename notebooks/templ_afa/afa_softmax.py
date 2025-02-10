@@ -271,7 +271,7 @@ def _fit_iter(
     pbar: tqdm.tqdm,
     plf: pl.Fabric,
 ) -> dict[str, float]:
-    selector: SoftmaxSelector = tstate["selector"].to(device=plf.device)
+    selector: SoftmaxSelector = tstate["selector"].train().to(device=plf.device)
     opt: th.optim.Optimizer = tstate["opt"]
     slosses_l: list[th.Tensor] = list()
     for bxps in tloader:
@@ -340,7 +340,7 @@ def run_one_episode(
     allfcombs_l: list[tuple[int, ...]],
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
-    selector.to(device=plf.device)
+    selector.eval().to(device=plf.device)
     fobsd_l: list[int] = [init_fidx]
     fcomb: tuple[int, ...] | None = None
     # repeat feature acquisition until all features in template has been acquired.
@@ -350,7 +350,7 @@ def run_one_episode(
         _m[fobsd_l] = 1
         # forward prop. selector
         _sinps: th.Tensor = th.cat((x, _m))[None, :].to(device=plf.device)
-        _souts: th.Tensor = selector(_sinps)
+        _souts: th.Tensor = selector(_sinps, to_probs=False)
         # choose a template
         _fcomb_idx: int = int(th.argmax(_souts[0]).item())
         _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
@@ -453,5 +453,20 @@ tstate = _TrainState(selector=selector, opt=opt, n_trial_itr=0, n_fit_itr=0, opt
 # %%
 fit(tstate=tstate, xps=xps, init_fidx=init_fidx, n_iter=1000, bsz=1024, plf=plf)
 
+# %%
+for _data in vcube:
+    _pyhat, _, _ = run_one_episode(
+        x=_data["xs"],
+        classifier=classifier,
+        selector=selector,
+        init_fidx=init_fidx,
+        allfcombs_l=allfcombs_l,
+        plf=plf,
+    )
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+print(pd.Series(metrics_d))
 
 # %%
