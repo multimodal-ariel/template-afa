@@ -224,7 +224,9 @@ def make_init_queries(
     xacts: th.Tensor = th.zeros((init_capital, tdata["xs"].shape[1]), dtype=th.float32)
     slbls: th.Tensor = th.empty((init_capital,), dtype=th.long)
     rewards: th.Tensor = th.empty((init_capital,), dtype=th.float32)
-    for _i, _data in enumerate(tdata[th.randint(0, len(tdata), (init_capital,))]):
+    didxs: th.Tensor = th.randint(0, len(tdata), (init_capital,))
+    for _i in tqdm.trange(init_capital, dynamic_ncols=True, leave=False):
+        _data: thd.TensorDict = tdata[didxs[_i]]
         _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
             x=_data["xs"],
             classifier=classifier,
@@ -423,13 +425,13 @@ xps = make_init_queries(
     init_fidx=init_fidx,
     allfcombs_l=allfcombs_l,
     fcomb_to_slbl=fcomb_to_slbl,
-    init_capital=100,
-    # init_capital=50 * len(tcube),
+    # init_capital=100,
+    init_capital=10 * len(tcube),
 )
 
 # %%
-# plf = pl.Fabric()
-plf = pl.Fabric(accelerator="cpu")
+plf = pl.Fabric()
+# plf = pl.Fabric(accelerator="cpu")
 
 # %%
 nnet = mymodels.nn.make_fcn(
@@ -451,7 +453,7 @@ opt = th.optim.Adam(selector.parameters())
 tstate = _TrainState(selector=selector, opt=opt, n_trial_itr=0, n_fit_itr=0, opt_step=0)
 
 # %%
-fit(tstate=tstate, xps=xps, init_fidx=init_fidx, n_iter=1000, bsz=1024, plf=plf)
+fit(tstate=tstate, xps=xps, init_fidx=init_fidx, n_iter=5000, bsz=4096, plf=plf)
 
 # %%
 for _data in vcube:
