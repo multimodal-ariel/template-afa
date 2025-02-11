@@ -406,9 +406,9 @@ metrics_func = thm.MetricCollection(
 
 #  %%
 init_fidx: int = 6
-n_tmpls: int = 256
-n_cands: int = 64
-lmbda: float = 0.01
+n_tmpls: int = 64
+n_cands: int = 256
+lmbda: float = 0.05
 max_features: int = 5
 
 # %%
@@ -443,8 +443,8 @@ for _data in vcube:
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
 metrics_d.update(
     {
-        "feature observed": th.mean(th.as_tensor(snfobsd_l)).item(),
-        "feature used": th.mean(th.as_tensor(snfcomb_l)).item(),
+        "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
     }
 )
 print(pd.Series(metrics_d))
@@ -514,8 +514,8 @@ for _data in vcube:
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
 metrics_d.update(
     {
-        "feature observed": th.mean(th.as_tensor(snfobsd_l)).item(),
-        "feature used": th.mean(th.as_tensor(snfcomb_l)).item(),
+        "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
     }
 )
 print(pd.Series(metrics_d))
