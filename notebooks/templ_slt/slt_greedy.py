@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import itertools as itrtls
+import os
 from typing import TypedDict
 
 import lightning as pl
+import lightning.fabric.loggers as plf_loggers
 import mydatasets.aaco
 import mylib.utils
 import mymodels.classifiers
@@ -383,7 +385,8 @@ def fit(
 
 
 # %%
-tcube, vcube = mydatasets.aaco.load_aaco_data("cube_20_0.3", to_normalize=False)
+data_name: str = "cube_20_0.3"
+tcube, vcube = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 n_covs: int = tcube["xs"].shape[1]
 n_labels: int = len(th.unique(tcube["ys"]))
 
@@ -405,7 +408,7 @@ metrics_func = thm.MetricCollection(
 init_fidx: int = 6
 n_tmpls: int = 256
 n_cands: int = 64
-lmbda: float = 0.1
+lmbda: float = 0.01
 max_features: int = 5
 
 # %%
@@ -419,21 +422,31 @@ tmpls: th.Tensor = make_templates(
     max_features=max_features,
 )
 allfcombs_l: list[tuple[int, ...]] = [
-    tuple(th.argwhere(_tmpl == 1).tolist()) for _tmpl in tmpls
+    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
 ]
 
 # %%
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
 for _data in vcube:
-    _pyhat, _, _ = run_one_random_episode(
+    _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
         x=_data["xs"],
         classifier=classifier,
         init_fidx=init_fidx,
         allfcombs_l=allfcombs_l,
     )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
     metrics_func.update(
         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
     )
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_d.update(
+    {
+        "feature observed": th.mean(th.as_tensor(snfobsd_l)).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l)).item(),
+    }
+)
 print(pd.Series(metrics_d))
 
 # %%
@@ -442,8 +455,14 @@ stdata = compile_selector_dataset(
 )
 
 # %%
-plf = pl.Fabric()
-# plf = pl.Fabric(accelerator="cpu")
+# configure logger and ckpt path
+output_dir: str = os.path.join("outputs", "run", data_name, "slt_greedy")
+os.makedirs(output_dir, exist_ok=True)
+tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
+
+# %%
+plf = pl.Fabric(loggers=[tfb_logger])
+# plf = pl.Fabric(loggers=[tfb_logger], accelerator="cpu")
 
 # %%
 nnet = mymodels.nn.make_fcn(
@@ -476,8 +495,10 @@ fit(
 )
 
 # %%
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
 for _data in vcube:
-    _pyhat, _, _ = run_one_episode(
+    _pyhat, _fobsd_l, _fcomb = run_one_episode(
         x=_data["xs"],
         classifier=classifier,
         selector=selector,
@@ -485,10 +506,18 @@ for _data in vcube:
         allfcombs_l=allfcombs_l,
         plf=plf,
     )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
     metrics_func.update(
         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
     )
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_d.update(
+    {
+        "feature observed": th.mean(th.as_tensor(snfobsd_l)).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l)).item(),
+    }
+)
 print(pd.Series(metrics_d))
 
 # %%
