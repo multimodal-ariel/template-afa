@@ -298,6 +298,7 @@ def _make_fit_bsinps(
     # (bsz, n_covs)
     bxs: th.Tensor = bstdata["xs"]
     bfms: th.Tensor = tmpls[btmplidxs].to(device=bxs.device)
+    n_covs: int = bxs.shape[1]
     # randomly drop features
     bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs))
     bnms[:, init_fidx] = 1
