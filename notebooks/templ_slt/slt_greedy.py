@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools as itrtls
+import math
 from typing import Any, Callable, Literal, TypedDict
 
 import lightning as pl
@@ -93,25 +94,31 @@ def make_templates(
     txs: th.Tensor = tdata["xs"]
     tys: th.Tensor = tdata["ys"]
     n_covs: int = txs.shape[1]
-    tmpls: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
+    tmpls: th.Tensor = th.zeros((n_templs, n_covs), dtype=th.long)
     tmpl_fcs: list[tuple[int, ...]] = list()
-    for _i in tqdm.trange(n_templs):
-        _nfeats: int = int(th.randint(0, max_features, (1,)).item())
+    for _i in tqdm.trange(
+        n_templs, desc="make templates", leave=True, dynamic_ncols=True
+    ):
         # make candidate pool
         _ctmpl_fcs: list[tuple[int, ...]] = list()
         while True:
             if len(_ctmpl_fcs) >= n_cands:
                 break
-            _fc = th.multinomial(th.arange(0, n_covs), num_samples=_nfeats).tolist()
+            _nfeats: int = int(th.randint(1, max_features + 1, (1,)).item())
+            _fc_l: list[int] = th.multinomial(
+                th.ones((n_covs,)), num_samples=_nfeats
+            ).tolist()
             # make sure init feature is in fcomb
-            if init_fidx not in _fc:
-                _fc.append(init_fidx)
+            if init_fidx not in _fc_l:
+                _fc_l.append(init_fidx)
                 # ensure max_features is kept
-                if len(_fc) > max_features:
-                    _fc = _fc[1:]
+                if len(_fc_l) > max_features:
+                    _fc_l = _fc_l[1:]
+            _fc_l.sort()
             # ensure _ctmpl_fcs are all unique entries
+            _fc: tuple[int, ...] = tuple(_fc_l)
             if _fc not in _ctmpl_fcs and _fc not in tmpl_fcs:
-                _ctmpl_fcs.append(tuple(sorted(_fc)))
+                _ctmpl_fcs.append(tuple(_fc))
         _ctmpls: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
         for _j, _fc in enumerate(_ctmpl_fcs):
             _ctmpls[_j, _fc] = 1
@@ -127,11 +134,13 @@ def make_templates(
         _cels: th.Tensor = th.nn.functional.cross_entropy(
             _pyhats, _ys, reduction="none"
         ).unflatten(0, (len(txs), n_cands))
-        _fitns: th.Tensor = _cels + lmbda * th.sum(_acts, dim=2)
-        # update identified
-        _fcidx: int = int(th.argmax(_fitns, dim=1).item())
+        # maximize fitness function
+        # (n_cands, )
+        _fitns: th.Tensor = th.mean(-_cels - lmbda * th.sum(_acts, dim=2), dim=0)
+        _fcidx: int = int(th.argmax(_fitns).item())
+        # update identified fcomb
         tmpl_fcs.append(_ctmpl_fcs[_fcidx])
-        tmpls[_i, _ctmpl_fcs[_fcidx]] = 1
+        tmpls[_i, tmpl_fcs[-1]] = 1
     return tmpls
 
 
@@ -171,3 +180,5 @@ tmpls: th.Tensor = make_templates(
     lmbda=lmbda,
     max_features=max_features,
 )
+
+# %%
