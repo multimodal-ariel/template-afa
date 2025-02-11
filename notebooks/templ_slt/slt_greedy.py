@@ -1,9 +1,7 @@
 # %%
 from __future__ import annotations
 
-import itertools as itrtls
-import math
-from typing import Any, Callable, Literal, TypedDict
+from typing import TypedDict
 
 import lightning as pl
 import mydatasets.aaco
@@ -12,7 +10,6 @@ import mymodels.classifiers
 import mymodels.nn
 import mymodels.protocols
 import numpy as np
-import pandas as pd
 import tensordict as thd
 import torch as th
 import torch.utils.data as th_data
@@ -163,12 +160,14 @@ def make_templates(
     return tmpls
 
 
+@th.no_grad()
 def compile_selector_dataset(
     tdata: thd.TensorDict,
     tmpls: th.Tensor,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     lmbda: float,
-) -> tuple[th.Tensor, th.Tensor]:
+) -> thd.TensorDict:
+    classifier.eval()
     xs: th.Tensor = tdata["xs"]
     ys: th.Tensor = tdata["ys"]
     n_data: int = len(xs)
@@ -186,7 +185,122 @@ def compile_selector_dataset(
     rwds: th.Tensor = -cels - lmbda * th.sum(tmpls, dim=1)[None, :]
     # (n_data)
     slbls: th.Tensor = th.argmax(rwds, dim=1)
-    return rwds, slbls
+    # bundle tensors into tensordict
+    stdata = thd.TensorDict(
+        {
+            "xs": xs,
+            "ys": ys,
+            "cels": cels,
+            "rwds": rwds,
+            "slbls": slbls,
+        }
+    ).auto_batch_size_(1)
+    return stdata
+
+
+class _TrainState(TypedDict):
+    selector: SoftmaxSelector
+    opt: th.optim.Optimizer
+    n_trial_itr: int
+    n_fit_itr: int
+    opt_step: int
+
+
+@th.no_grad()
+def _make_fit_bsinps(
+    bstdata: thd.TensorDict, init_fidx: int, tmpls: th.Tensor
+) -> th.Tensor:
+    bsz: int = len(bstdata)
+    n_tmpls: int = len(tmpls)
+    # (bsz, )
+    btmplidxs: th.Tensor = th.randint(0, n_tmpls, (bsz,))
+    # (bsz, n_covs)
+    bxs: th.Tensor = bstdata["xs"]
+    bfms: th.Tensor = tmpls[btmplidxs].to(device=bxs.device)
+    # randomly drop features
+    bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs))
+    bnms[:, init_fidx] = 1
+    bnms = th.cat((bnms, bnms), dim=1).to(device=bxs.device)
+    # (bsz, 2 * n_covs)
+    bsinps: th.Tensor = th.cat((bxs, bfms), dim=1)
+    bsinps = bsinps * bnms
+    return bsinps
+
+
+def _fit_iter(
+    tstate: _TrainState,
+    tloader: th_data.DataLoader,
+    init_fidx: int,
+    tmpls: th.Tensor,
+    pbar: tqdm.tqdm,
+    plf: pl.Fabric,
+) -> dict[str, float]:
+    selector: SoftmaxSelector = tstate["selector"].train().to(device=plf.device)
+    opt: th.optim.Optimizer = tstate["opt"]
+    slosses_l: list[th.Tensor] = list()
+    for bstdata in tloader:
+        bstdata: thd.TensorDict
+        bstdata = bstdata.to(device=plf.device)
+        # (bsz, 2 * n_covs)
+        bsinps: th.Tensor = _make_fit_bsinps(
+            bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
+        )
+        # (bsz, n_tmpls)
+        bsouts: th.Tensor = selector(bsinps, to_probs=False)
+        # compute selector loss
+        bslosses: th.Tensor = th.nn.functional.cross_entropy(
+            bsouts, th.softmax(bstdata["rwds"], dim=1), reduction="none"
+        )
+        bsloss: th.Tensor = th.mean(bslosses)
+        # update selector parameter
+        opt.zero_grad()
+        bsloss.backward()
+        opt.step()
+        # track metrics
+        slosses_l.append(bslosses.detach().to(device="cpu"))
+        bmetrics_d: dict[str, float] = {
+            "bsloss": bsloss.item(),
+        }
+        pbar.set_postfix(bmetrics_d)
+        plf.log_dict(
+            mylib.utils.add_prefix_to_dict(bmetrics_d, "train"), step=tstate["opt_step"]
+        )
+        tstate["opt_step"] = tstate["opt_step"] + 1
+    sloss_avg: th.Tensor = th.mean(th.cat(slosses_l, dim=0))
+    metrics_d: dict[str, float] = {"sloss_avg": sloss_avg.item()}
+    return metrics_d
+
+
+def fit(
+    tstate: _TrainState,
+    stdata: thd.TensorDict,
+    init_fidx: int,
+    tmpls: th.Tensor,
+    n_iter: int,
+    bsz: int,
+    plf: pl.Fabric,
+):
+    tloader = th_data.DataLoader(
+        stdata,  # type: ignore
+        batch_size=bsz,
+        shuffle=True,
+        collate_fn=lambda x: x,
+    )
+    pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
+    for _ in pbar:
+        metrics_d: dict[str, float] = _fit_iter(
+            tstate=tstate,
+            tloader=tloader,
+            init_fidx=init_fidx,
+            tmpls=tmpls,
+            pbar=pbar,
+            plf=plf,
+        )
+        plf.log_dict(
+            mylib.utils.add_prefix_to_dict(metrics_d, "train"), step=tstate["n_fit_itr"]
+        )
+        tstate["n_fit_itr"] = tstate["n_fit_itr"] + 1
+    pbar.close()
 
 
 # %%
