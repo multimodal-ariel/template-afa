@@ -1,6 +1,7 @@
 # %%
 from __future__ import annotations
 
+import itertools as itrtls
 from typing import TypedDict
 
 import lightning as pl
@@ -10,6 +11,7 @@ import mymodels.classifiers
 import mymodels.nn
 import mymodels.protocols
 import numpy as np
+import pandas as pd
 import tensordict as thd
 import torch as th
 import torch.utils.data as th_data
@@ -84,10 +86,10 @@ class SoftmaxSelector(th.nn.Module):
     n_templates: int
     nnet: th.nn.Module
 
-    def __init__(self, n_covs: int, n_templates: int, nnet: th.nn.Module) -> None:
+    def __init__(self, n_covs: int, n_tmpls: int, nnet: th.nn.Module) -> None:
         super().__init__()
         self.n_covs = n_covs
-        self.n_templates = n_templates
+        self.n_templates = n_tmpls
         self.nnet = nnet
 
     def forward(self, sinps: th.Tensor, to_probs: bool) -> th.Tensor:
@@ -98,11 +100,88 @@ class SoftmaxSelector(th.nn.Module):
 
 
 # %%
+def run_one_random_episode(
+    x: th.Tensor,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    allfcombs_l: list[tuple[int, ...]],
+) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+    fobsd_l: list[int] = [init_fidx]
+    fcomb: tuple[int, ...] | None = None
+    # repeat feature acquisition until all features in template has been acquired.
+    for _ in itrtls.count():
+        # randomly choose an initial template
+        _fcomb_idx: int = int(th.randint(0, len(allfcombs_l), size=(1,)).item())
+        _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
+        # ident. unacquired features
+        _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
+        if len(_tmp_fcomb) == 0:
+            fcomb = _tmpl_fcomb
+            break
+        # randomly choose a feature to acquire
+        _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
+        # add acquired feature to fcomb
+        fobsd_l.append(_tmp_fcomb[_tmp_fcomb_idx])
+        # terminate acq. if all features in template has been satisfied
+        if all([fidx in fobsd_l for fidx in _tmpl_fcomb]):
+            fcomb = _tmpl_fcomb
+            break
+    assert fcomb is not None
+    acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
+    acts[0, fcomb] = 1
+    pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
+    return pyhats[0], fobsd_l, fcomb
+
+
+@th.no_grad()
+def run_one_episode(
+    x: th.Tensor,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    selector: SoftmaxSelector,
+    init_fidx: int,
+    allfcombs_l: list[tuple[int, ...]],
+    plf: pl.Fabric,
+) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+    selector.eval().to(device=plf.device)
+    fobsd_l: list[int] = [init_fidx]
+    fcomb: tuple[int, ...] | None = None
+    # repeat feature acquisition until all features in template has been acquired.
+    for _ in itrtls.count():
+        # make feature bit mask
+        _m: th.Tensor = th.zeros_like(x)
+        _m[fobsd_l] = 1
+        # forward prop. selector
+        _sinps: th.Tensor = th.cat((x, _m))[None, :].to(device=plf.device)
+        _souts: th.Tensor = selector(_sinps, to_probs=False)
+        # choose a template
+        _fcomb_idx: int = int(th.argmax(_souts[0]).item())
+        _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
+        # ident. unacquired features
+        _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
+        if len(_tmp_fcomb) == 0:
+            fcomb = _tmpl_fcomb
+            break
+        # randomly choose a feature to acquire
+        _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
+        # add acquired feature to fcomb
+        fobsd_l.append(_tmp_fcomb[_tmp_fcomb_idx])
+        # terminate acq. if all features in template has been satisfied
+        if all([fidx in fobsd_l for fidx in _tmpl_fcomb]):
+            fcomb = _tmpl_fcomb
+            break
+    assert fcomb is not None
+    acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
+    acts[0, fcomb] = 1
+    pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
+    return pyhats[0], fobsd_l, fcomb
+
+
+# %%
 def make_templates(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     init_fidx: int,
-    n_templs: int,
+    n_tmpls: int,
     n_cands: int,
     lmbda: float,
     max_features: int,
@@ -110,10 +189,10 @@ def make_templates(
     txs: th.Tensor = tdata["xs"]
     tys: th.Tensor = tdata["ys"]
     n_covs: int = txs.shape[1]
-    tmpls: th.Tensor = th.zeros((n_templs, n_covs), dtype=th.long)
+    tmpls: th.Tensor = th.zeros((n_tmpls, n_covs), dtype=th.long)
     tmpl_fcs: list[tuple[int, ...]] = list()
     for _i in tqdm.trange(
-        n_templs, desc="make templates", leave=True, dynamic_ncols=True
+        n_tmpls, desc="make templates", leave=True, dynamic_ncols=True
     ):
         # make candidate pool
         _ctmpl_fcs: list[tuple[int, ...]] = list()
@@ -324,7 +403,7 @@ metrics_func = thm.MetricCollection(
 
 #  %%
 init_fidx: int = 6
-n_templs: int = 256
+n_tmpls: int = 256
 n_cands: int = 64
 lmbda: float = 0.1
 max_features: int = 5
@@ -334,15 +413,82 @@ tmpls: th.Tensor = make_templates(
     tdata=tcube,
     classifier=classifier,
     init_fidx=init_fidx,
-    n_templs=n_templs,
+    n_tmpls=n_tmpls,
     n_cands=n_cands,
     lmbda=lmbda,
     max_features=max_features,
 )
+allfcombs_l: list[tuple[int, ...]] = [
+    tuple(th.argwhere(_tmpl == 1).tolist()) for _tmpl in tmpls
+]
 
 # %%
-rwds, slbls = compile_selector_dataset(
+for _data in vcube:
+    _pyhat, _, _ = run_one_random_episode(
+        x=_data["xs"],
+        classifier=classifier,
+        init_fidx=init_fidx,
+        allfcombs_l=allfcombs_l,
+    )
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+print(pd.Series(metrics_d))
+
+# %%
+stdata = compile_selector_dataset(
     tdata=tcube, tmpls=tmpls, classifier=classifier, lmbda=lmbda
 )
+
+# %%
+plf = pl.Fabric()
+# plf = pl.Fabric(accelerator="cpu")
+
+# %%
+nnet = mymodels.nn.make_fcn(
+    in_features=2 * tcube["xs"].shape[1],
+    out_features=n_tmpls,
+    layer_specs=[
+        (tcube["xs"].shape[1], None, None, None),
+        (tcube["xs"].shape[1], None, None, None),
+    ],
+)
+selector = SoftmaxSelector(
+    n_covs=n_covs,
+    n_tmpls=n_tmpls,
+    nnet=nnet,
+)
+opt = th.optim.Adam(selector.parameters())
+
+# %%
+tstate = _TrainState(selector=selector, opt=opt, n_trial_itr=0, n_fit_itr=0, opt_step=0)
+
+# %%
+fit(
+    tstate=tstate,
+    stdata=stdata,
+    init_fidx=init_fidx,
+    tmpls=tmpls,
+    n_iter=5000,
+    bsz=4096,
+    plf=plf,
+)
+
+# %%
+for _data in vcube:
+    _pyhat, _, _ = run_one_episode(
+        x=_data["xs"],
+        classifier=classifier,
+        selector=selector,
+        init_fidx=init_fidx,
+        allfcombs_l=allfcombs_l,
+        plf=plf,
+    )
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+print(pd.Series(metrics_d))
 
 # %%
