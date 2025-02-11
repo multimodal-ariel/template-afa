@@ -82,6 +82,25 @@ class SubsetFeatureNaiveBayes(mymodels.classifiers.SubsetFeatureClassifier[None]
 
 
 # %%
+class SoftmaxSelector(th.nn.Module):
+    n_covs: int
+    n_templates: int
+    nnet: th.nn.Module
+
+    def __init__(self, n_covs: int, n_templates: int, nnet: th.nn.Module) -> None:
+        super().__init__()
+        self.n_covs = n_covs
+        self.n_templates = n_templates
+        self.nnet = nnet
+
+    def forward(self, sinps: th.Tensor, to_probs: bool) -> th.Tensor:
+        outs: th.Tensor = self.nnet(sinps)
+        if to_probs:
+            outs = th.nn.functional.softmax(outs)
+        return outs
+
+
+# %%
 def make_templates(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -144,6 +163,32 @@ def make_templates(
     return tmpls
 
 
+def compile_selector_dataset(
+    tdata: thd.TensorDict,
+    tmpls: th.Tensor,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    lmbda: float,
+) -> tuple[th.Tensor, th.Tensor]:
+    xs: th.Tensor = tdata["xs"]
+    ys: th.Tensor = tdata["ys"]
+    n_data: int = len(xs)
+    n_tmpls: int = len(tmpls)
+    # (n_data * n_tmpls, n_labels)
+    pyhats_: th.Tensor = classifier.predict_proba(
+        ctxs=xs[:, None, :].expand(-1, n_tmpls, -1).flatten(0, 1),
+        acts=tmpls[None, :, :].expand(n_data, -1, -1).flatten(0, 1),
+    )
+    ys_: th.Tensor = ys[:, None].expand(n_data, n_tmpls).flatten(0, 1)
+    # (n_data, n_tmpls)
+    cels: th.Tensor = th.nn.functional.cross_entropy(
+        pyhats_, ys_, reduction="none"
+    ).unflatten(0, (n_data, n_tmpls))
+    rwds: th.Tensor = -cels - lmbda * th.sum(tmpls, dim=1)[None, :]
+    # (n_data)
+    slbls: th.Tensor = th.argmax(rwds, dim=1)
+    return rwds, slbls
+
+
 # %%
 tcube, vcube = mydatasets.aaco.load_aaco_data("cube_20_0.3", to_normalize=False)
 n_covs: int = tcube["xs"].shape[1]
@@ -179,6 +224,11 @@ tmpls: th.Tensor = make_templates(
     n_cands=n_cands,
     lmbda=lmbda,
     max_features=max_features,
+)
+
+# %%
+rwds, slbls = compile_selector_dataset(
+    tdata=tcube, tmpls=tmpls, classifier=classifier, lmbda=lmbda
 )
 
 # %%
