@@ -564,14 +564,48 @@ def fit(
 
 
 # %%
-data_name: str = "cube_20_0.3"
-tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
-n_covs: int = tdata["xs"].shape[1]
-n_labels: int = len(th.unique(tdata["ys"]))
+# data_name: str = "cube_20_0.3"
+# tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+# n_covs: int = tdata["xs"].shape[1]
+# n_labels: int = len(th.unique(tdata["ys"]))
+
+# # %%
+# classifier = SubsetFeatureNaiveBayes(
+#     0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
+# )
+# metrics_func = thm.MetricCollection(
+#     {
+#         "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+#         "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+#         "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+#         "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+#         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+#     }
+# )
+
+# #  %%
+# init_fidx: int = 6
+# n_tmpls: int = 64
+# n_cands: int = 5_000
+# lmbda: float = 0.0
+# max_features: int = 5
+# # tau_rwd: float = 0.01
+# bsz: int = 1024
 
 # %%
-classifier = SubsetFeatureNaiveBayes(
-    0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
+data_name: str = "big5_C_cls"
+_tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+n_covs: int = _tdata["xs"].shape[1]
+n_labels: int = len(th.unique(_tdata["ys"]))
+
+# %%
+_tdata_shuffle_idxs = th.randperm(len(_tdata))
+tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
+extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
+
+# %%
+classifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
+    xs_train=extdata["xs"].numpy(), ys_train=extdata["ys"].numpy()
 )
 metrics_func = thm.MetricCollection(
     {
@@ -584,11 +618,11 @@ metrics_func = thm.MetricCollection(
 )
 
 #  %%
-init_fidx: int = 6
-n_tmpls: int = 64
-n_cands: int = 5_000
-lmbda: float = 0.0
-max_features: int = 5
+init_fidx: int = 31
+n_tmpls: int = 128
+n_cands: int = 10_000
+lmbda: float = 0.075
+max_features: int = n_covs
 # tau_rwd: float = 0.01
 bsz: int = 1024
 
