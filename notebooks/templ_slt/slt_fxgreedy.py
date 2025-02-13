@@ -180,6 +180,22 @@ def run_one_episode(
     return pyhats[0], fobsd_l, fcomb
 
 
+def eval_with_oracle_from_precomp(
+    data: thd.TensorDict, pcomp: thd.TensorDict, tmpls: th.Tensor
+) -> tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
+    # (n_data, n_tmpl)
+    rwds: th.Tensor = pcomp["rwds"]
+    # (n_data, ) (n_data, )
+    rwds, aidxs = th.max(rwds, dim=1)
+    # (n_data, n_covs)
+    acts: th.Tensor = tmpls[aidxs]
+    # (n_data, n_labels)
+    pyhats: th.Tensor = th.gather(
+        pcomp["pyhats"], dim=1, index=aidxs[:, None, None].expand_as(pcomp["pyhats"])
+    )[:, 0, :]
+    return acts, pyhats, data["ys"], rwds
+
+
 # %%
 def make_template_candidates(
     n_covs: int, init_fidx: int, n_cands: int, min_features: int, max_features: int
@@ -597,6 +613,8 @@ allfcombs_l: list[tuple[int, ...]] = [
 n_tmpls = len(tmpls)
 
 # %%
+print("greedy+random")
+metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
 for _data in vcube:
@@ -612,10 +630,31 @@ for _data in vcube:
         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
     )
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
 metrics_d.update(
     {
         "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
         "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
+    }
+)
+print(pd.Series(metrics_d))
+
+# %%
+print("greedy+oracle")
+vpcomp = precomp_rwds_for_ctmpls(
+    ctmpls=tmpls, tdata=vcube, classifier=classifier, lmbda=lmbda, bsz=bsz
+)
+acts, pyhats, ys, _ = eval_with_oracle_from_precomp(
+    data=vcube, pcomp=vpcomp, tmpls=tmpls
+)
+metrics_func.reset()
+metrics_func.update(pyhats[:, :, None], ys[:,None])
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "feature observed": th.mean(acts.to(dtype=th.float32)).item(),
+        "feature used": th.mean(acts.to(dtype=th.float32)).item(),
     }
 )
 print(pd.Series(metrics_d))
@@ -666,6 +705,8 @@ fit(
 )
 
 # %%
+print("greedy+selector")
+metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
 for _data in vcube:
@@ -683,6 +724,7 @@ for _data in vcube:
         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
     )
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
 metrics_d.update(
     {
         "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
