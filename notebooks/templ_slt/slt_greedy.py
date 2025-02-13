@@ -430,6 +430,8 @@ allfcombs_l: list[tuple[int, ...]] = [
 ]
 
 # %%
+print("greedy+random")
+metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
 for _data in vcube:
@@ -445,6 +447,7 @@ for _data in vcube:
         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
     )
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
 metrics_d.update(
     {
         "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
@@ -499,6 +502,8 @@ fit(
 )
 
 # %%
+print("greedy+selector")
+metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
 for _data in vcube:
@@ -516,6 +521,7 @@ for _data in vcube:
         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
     )
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
 metrics_d.update(
     {
         "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
