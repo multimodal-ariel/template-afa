@@ -317,16 +317,16 @@ def make_template_candidates(
 #     return tpcomp
 
 
-def precomp_rwds_for_ctmpls(
-    ctmpls: th.Tensor,
-    tdata: thd.TensorDict,
+def precomp_rwds_for_tmpls(
+    tmpls: th.Tensor,
+    data: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     lmbda: float,
     bsz: int,
 ) -> thd.TensorDict:
-    txs: th.Tensor = tdata["xs"]
-    tys: th.Tensor = tdata["ys"]
-    n_cands: int = len(ctmpls)
+    txs: th.Tensor = data["xs"]
+    tys: th.Tensor = data["ys"]
+    n_cands: int = len(tmpls)
     n_labels: int = len(th.unique(tys))
     # (n_data,  n_cands, n_labels)
     pyhats: th.Tensor = th.empty((len(txs), n_cands, n_labels), dtype=th.float32)
@@ -349,7 +349,7 @@ def precomp_rwds_for_ctmpls(
         _bsz: int = len(_btidxs)
         # (_bsz * n_cands, n_covs)
         _bctxs: th.Tensor = txs[_btidxs, None, :].expand(-1, n_cands, -1).flatten(0, 1)
-        _bacts: th.Tensor = ctmpls[None, :, :].expand(_bsz, -1, -1).flatten(0, 1)
+        _bacts: th.Tensor = tmpls[None, :, :].expand(_bsz, -1, -1).flatten(0, 1)
         # (_bsz * n_cands, n_labels)
         _bpyhats: th.Tensor = classifier.predict_proba(_bctxs, _bacts)
         _blyhats: th.Tensor = torch.distributions.utils.probs_to_logits(_bpyhats)
@@ -429,7 +429,6 @@ def compile_selector_dataset(
     tdata: thd.TensorDict,
     tpcomp: thd.TensorDict,
     slctd_ms: th.Tensor,
-    tau_rwd: float,
 ) -> thd.TensorDict:
     # (n_data, n_covs)
     xs: th.Tensor = tdata["xs"]
@@ -440,8 +439,10 @@ def compile_selector_dataset(
     # (n_data, n_tmpls)
     cels: th.Tensor = tpcomp["cels"][:, slctd_ms]
     rwds: th.Tensor = tpcomp["rwds"][:, slctd_ms]
-    # (n_data, n_tmpls)
-    slbls: th.Tensor = th.softmax(rwds / tau_rwd, dim=1)
+    # (n_data, )
+    slbls: th.Tensor = th.argmax(rwds, dim=1)
+    # # (n_data, n_tmpls)
+    # slbls: th.Tensor = th.softmax(rwds / tau_rwd, dim=1)
     # bundle tensors into tensordict
     stdata = thd.TensorDict(
         {
@@ -588,7 +589,7 @@ n_tmpls: int = 64
 n_cands: int = 5_000
 lmbda: float = 0.0
 max_features: int = 5
-tau_rwd: float = 0.01
+# tau_rwd: float = 0.01
 bsz: int = 1024
 
 # %%
@@ -601,8 +602,8 @@ ctmpls: th.Tensor = make_template_candidates(
 )
 
 # %%
-tpcomp = precomp_rwds_for_ctmpls(
-    ctmpls, tdata=tcube, classifier=classifier, lmbda=lmbda, bsz=bsz
+tpcomp = precomp_rwds_for_tmpls(
+    ctmpls, data=tcube, classifier=classifier, lmbda=lmbda, bsz=bsz
 )
 
 # %%
@@ -641,14 +642,14 @@ print(pd.Series(metrics_d))
 
 # %%
 print("greedy+oracle")
-vpcomp = precomp_rwds_for_ctmpls(
-    ctmpls=tmpls, tdata=vcube, classifier=classifier, lmbda=lmbda, bsz=bsz
+vpcomp = precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=vcube, classifier=classifier, lmbda=lmbda, bsz=bsz
 )
 acts, pyhats, ys, _ = eval_with_oracle_from_precomp(
     data=vcube, pcomp=vpcomp, tmpls=tmpls
 )
 metrics_func.reset()
-metrics_func.update(pyhats[:, :, None], ys[:,None])
+metrics_func.update(pyhats[:, :, None], ys[:, None])
 metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
 metrics_func.reset()
 metrics_d.update(
@@ -660,9 +661,7 @@ metrics_d.update(
 print(pd.Series(metrics_d))
 
 # %%
-stdata = compile_selector_dataset(
-    tdata=tcube, tpcomp=tpcomp, slctd_ms=slctd_ms, tau_rwd=tau_rwd
-)
+stdata = compile_selector_dataset(tdata=tcube, tpcomp=tpcomp, slctd_ms=slctd_ms)
 
 # %%
 # configure logger and ckpt path
