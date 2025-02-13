@@ -663,75 +663,75 @@ metrics_d.update(
 print(pd.Series(metrics_d))
 
 # %%
-stdata = compile_selector_dataset(tdata=tcube, tpcomp=tpcomp, slctd_ms=slctd_ms)
+# stdata = compile_selector_dataset(tdata=tcube, tpcomp=tpcomp, slctd_ms=slctd_ms)
 
-# %%
-# configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "slt_fxgreedy")
-os.makedirs(output_dir, exist_ok=True)
-tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
+# # %%
+# # configure logger and ckpt path
+# output_dir: str = os.path.join("outputs", "run", data_name, "slt_fxgreedy")
+# os.makedirs(output_dir, exist_ok=True)
+# tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 
-# %%
-plf = pl.Fabric(loggers=[tfb_logger])
-# plf = pl.Fabric(loggers=[tfb_logger], accelerator="cpu")
+# # %%
+# plf = pl.Fabric(loggers=[tfb_logger])
+# # plf = pl.Fabric(loggers=[tfb_logger], accelerator="cpu")
 
-# %%
-nnet = mymodels.nn.make_fcn(
-    in_features=2 * tcube["xs"].shape[1],
-    out_features=n_tmpls,
-    layer_specs=[
-        (tcube["xs"].shape[1], None, None, None),
-        (tcube["xs"].shape[1], None, None, None),
-    ],
-)
-selector = SoftmaxSelector(
-    n_covs=n_covs,
-    n_tmpls=n_tmpls,
-    nnet=nnet,
-)
-opt = th.optim.Adam(selector.parameters())
+# # %%
+# nnet = mymodels.nn.make_fcn(
+#     in_features=2 * tcube["xs"].shape[1],
+#     out_features=n_tmpls,
+#     layer_specs=[
+#         (tcube["xs"].shape[1], None, None, None),
+#         (tcube["xs"].shape[1], None, None, None),
+#     ],
+# )
+# selector = SoftmaxSelector(
+#     n_covs=n_covs,
+#     n_tmpls=n_tmpls,
+#     nnet=nnet,
+# )
+# opt = th.optim.Adam(selector.parameters())
 
-# %%
-tstate = _TrainState(selector=selector, opt=opt, n_trial_itr=0, n_fit_itr=0, opt_step=0)
+# # %%
+# tstate = _TrainState(selector=selector, opt=opt, n_trial_itr=0, n_fit_itr=0, opt_step=0)
 
-# %%
-fit(
-    tstate=tstate,
-    stdata=stdata,
-    init_fidx=init_fidx,
-    tmpls=tmpls,
-    n_iter=5000,
-    bsz=4096,
-    plf=plf,
-)
+# # %%
+# fit(
+#     tstate=tstate,
+#     stdata=stdata,
+#     init_fidx=init_fidx,
+#     tmpls=tmpls,
+#     n_iter=5000,
+#     bsz=4096,
+#     plf=plf,
+# )
 
-# %%
-print("greedy+selector")
-metrics_func.reset()
-snfobsd_l: list[int] = list()
-snfcomb_l: list[int] = list()
-for _data in vcube:
-    _pyhat, _fobsd_l, _fcomb = run_one_episode(
-        x=_data["xs"],
-        classifier=classifier,
-        selector=selector,
-        init_fidx=init_fidx,
-        allfcombs_l=allfcombs_l,
-        plf=plf,
-    )
-    snfobsd_l.append(len(_fobsd_l))
-    snfcomb_l.append(len(_fcomb))
-    metrics_func.update(
-        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-    )
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
-        "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
-    }
-)
-print(pd.Series(metrics_d))
+# # %%
+# print("greedy+selector")
+# metrics_func.reset()
+# snfobsd_l: list[int] = list()
+# snfcomb_l: list[int] = list()
+# for _data in vcube:
+#     _pyhat, _fobsd_l, _fcomb = run_one_episode(
+#         x=_data["xs"],
+#         classifier=classifier,
+#         selector=selector,
+#         init_fidx=init_fidx,
+#         allfcombs_l=allfcombs_l,
+#         plf=plf,
+#     )
+#     snfobsd_l.append(len(_fobsd_l))
+#     snfcomb_l.append(len(_fcomb))
+#     metrics_func.update(
+#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+#     )
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
+#         "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
+#     }
+# )
+# print(pd.Series(metrics_d))
 
 # %%
