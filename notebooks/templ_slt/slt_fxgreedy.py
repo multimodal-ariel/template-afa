@@ -641,10 +641,12 @@ metrics_d.update(
 print(pd.Series(metrics_d))
 
 # %%
-print("greedy+oracle")
 vpcomp = precomp_rwds_for_tmpls(
     tmpls=tmpls, data=vcube, classifier=classifier, lmbda=lmbda, bsz=bsz
 )
+
+# %%
+print("greedy+oracle")
 acts, pyhats, ys, _ = eval_with_oracle_from_precomp(
     data=vcube, pcomp=vpcomp, tmpls=tmpls
 )
@@ -654,8 +656,8 @@ metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().it
 metrics_func.reset()
 metrics_d.update(
     {
-        "feature observed": th.mean(acts.to(dtype=th.float32)).item(),
-        "feature used": th.mean(acts.to(dtype=th.float32)).item(),
+        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
     }
 )
 print(pd.Series(metrics_d))
