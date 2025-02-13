@@ -570,9 +570,9 @@ metrics_func = thm.MetricCollection(
 init_fidx: int = 6
 n_tmpls: int = 64
 n_cands: int = 5_000
-lmbda: float = 0.05
+lmbda: float = 0.0
 max_features: int = 5
-tau_rwd: float = 0.1
+tau_rwd: float = 0.01
 bsz: int = 1024
 
 # %%
@@ -627,7 +627,7 @@ stdata = compile_selector_dataset(
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "slt_greedy")
+output_dir: str = os.path.join("outputs", "run", data_name, "slt_fxgreedy")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 
