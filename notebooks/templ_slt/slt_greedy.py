@@ -390,13 +390,13 @@ def fit(
 
 # %%
 data_name: str = "cube_20_0.3"
-tcube, vcube = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
-n_covs: int = tcube["xs"].shape[1]
-n_labels: int = len(th.unique(tcube["ys"]))
+tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+n_covs: int = tdata["xs"].shape[1]
+n_labels: int = len(th.unique(tdata["ys"]))
 
 # %%
 classifier = SubsetFeatureNaiveBayes(
-    0.3, xs_train=tcube["xs"].numpy(), ys_train=tcube["ys"].numpy()
+    0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
 )
 metrics_func = thm.MetricCollection(
     {
@@ -417,7 +417,7 @@ max_features: int = 5
 
 # %%
 tmpls: th.Tensor = make_templates(
-    tdata=tcube,
+    tdata=tdata,
     classifier=classifier,
     init_fidx=init_fidx,
     n_tmpls=n_tmpls,
@@ -434,7 +434,7 @@ print("greedy+random")
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
-for _data in vcube:
+for _data in vdata:
     _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
         x=_data["xs"],
         classifier=classifier,
@@ -458,7 +458,7 @@ print(pd.Series(metrics_d))
 
 # %%
 stdata = compile_selector_dataset(
-    tdata=tcube, tmpls=tmpls, classifier=classifier, lmbda=lmbda
+    tdata=tdata, tmpls=tmpls, classifier=classifier, lmbda=lmbda
 )
 
 # %%
@@ -473,11 +473,11 @@ plf = pl.Fabric(loggers=[tfb_logger])
 
 # %%
 nnet = mymodels.nn.make_fcn(
-    in_features=2 * tcube["xs"].shape[1],
+    in_features=2 * tdata["xs"].shape[1],
     out_features=n_tmpls,
     layer_specs=[
-        (tcube["xs"].shape[1], None, None, None),
-        (tcube["xs"].shape[1], None, None, None),
+        (tdata["xs"].shape[1], None, None, None),
+        (tdata["xs"].shape[1], None, None, None),
     ],
 )
 selector = SoftmaxSelector(
@@ -506,7 +506,7 @@ print("greedy+selector")
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
-for _data in vcube:
+for _data in vdata:
     _pyhat, _fobsd_l, _fcomb = run_one_episode(
         x=_data["xs"],
         classifier=classifier,

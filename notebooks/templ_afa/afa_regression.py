@@ -392,13 +392,13 @@ def run_one_episode(
 
 
 # %%
-tcube, vcube = mydatasets.aaco.load_aaco_data("cube_20_0.3", to_normalize=False)
-n_covs: int = tcube["xs"].shape[1]
-n_labels: int = len(th.unique(tcube["ys"]))
+tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("cube_20_0.3", to_normalize=False)
+n_covs: int = tdata["xs"].shape[1]
+n_labels: int = len(th.unique(tdata["ys"]))
 
 # %%
 allfcombs_l, init_fidx = make_templates(
-    tcube, is_classification=True, max_features=5, top_k_features=10
+    tdata, is_classification=True, max_features=5, top_k_features=10
 )
 fcomb_to_slbl: dict[tuple[int, ...], int] = {
     fcomb: i for i, fcomb in enumerate(allfcombs_l)
@@ -407,7 +407,7 @@ n_templates: int = len(allfcombs_l)
 
 # %%
 classifier = SubsetFeatureNaiveBayes(
-    0.3, xs_train=tcube["xs"].numpy(), ys_train=tcube["ys"].numpy()
+    0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
 )
 metrics_func = thm.MetricCollection(
     {
@@ -420,7 +420,7 @@ metrics_func = thm.MetricCollection(
 )
 
 # %%
-for _data in vcube:
+for _data in vdata:
     _pyhat, _, _ = run_one_random_episode(
         x=_data["xs"],
         classifier=classifier,
@@ -435,13 +435,13 @@ print(pd.Series(metrics_d))
 
 # %%
 xps = make_init_queries(
-    tdata=tcube,
+    tdata=tdata,
     classifier=classifier,
     init_fidx=init_fidx,
     allfcombs_l=allfcombs_l,
     fcomb_to_slbl=fcomb_to_slbl,
     # init_capital=100,
-    init_capital=10 * len(tcube),
+    init_capital=10 * len(tdata),
 )
 
 # %%
@@ -450,11 +450,11 @@ plf = pl.Fabric()
 
 # %%
 nnet = mymodels.nn.make_fcn(
-    in_features=2 * tcube["xs"].shape[1],
+    in_features=2 * tdata["xs"].shape[1],
     out_features=n_templates,
     layer_specs=[
-        (tcube["xs"].shape[1], None, None, None),
-        (tcube["xs"].shape[1], None, None, None),
+        (tdata["xs"].shape[1], None, None, None),
+        (tdata["xs"].shape[1], None, None, None),
     ],
 )
 selector = SoftmaxSelector(
@@ -471,7 +471,7 @@ tstate = _TrainState(selector=selector, opt=opt, n_trial_itr=0, n_fit_itr=0, opt
 fit(tstate=tstate, xps=xps, init_fidx=init_fidx, n_iter=5000, bsz=4096, plf=plf)
 
 # %%
-for _data in vcube:
+for _data in vdata:
     _pyhat, _, _ = run_one_episode(
         x=_data["xs"],
         classifier=classifier,

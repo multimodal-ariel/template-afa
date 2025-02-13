@@ -11,7 +11,7 @@ import torch as th
 
 def load_aaco_data(
     name: str, to_normalize: bool = True
-) -> tuple[thd.TensorDict, thd.TensorDict]:
+) -> tuple[thd.TensorDict, thd.TensorDict, thd.TensorDict]:
     data: dict[str, tuple[np.ndarray, np.ndarray]] = np.load(
         os.path.join(
             mydatasets.common.get_datasets_files_root_dir(), "aaco", f"{name}.pkl"
@@ -22,6 +22,8 @@ def load_aaco_data(
     yst: np.ndarray = data["train"][1].flatten()
     xsv: np.ndarray = data["valid"][0]
     ysv: np.ndarray = data["valid"][1].flatten()
+    xstst: np.ndarray = data["test"][0]
+    ystst: np.ndarray = data["test"][1].flatten()
     if to_normalize:
         nmlr = skl_preproc.StandardScaler()
         xst = nmlr.fit_transform(xst)
@@ -38,4 +40,10 @@ def load_aaco_data(
             "ys": th.as_tensor(ysv, dtype=th.long),
         }
     ).auto_batch_size_(1)
-    return tdata, vdata
+    tstdata = thd.TensorDict(
+        {
+            "xs": th.as_tensor(xstst, dtype=th.float32),
+            "ys": th.as_tensor(ystst, dtype=th.long),
+        }
+    ).auto_batch_size_(1)
+    return tdata, vdata, tstdata

@@ -174,17 +174,17 @@ def run_one_episode(
 
 
 # %%
-tcube, vcube = mydatasets.aaco.load_aaco_data("cube_20_0.3", to_normalize=False)
-n_labels: int = len(th.unique(tcube["ys"]))
+tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("cube_20_0.3", to_normalize=False)
+n_labels: int = len(th.unique(tdata["ys"]))
 
 # %%
 allfcombs_l, init_fidx = make_templates(
-    tcube, is_classification=True, max_features=5, top_k_features=10
+    tdata, is_classification=True, max_features=5, top_k_features=10
 )
 
 # %%
 classifier = SubsetFeatureNaiveBayes(
-    0.3, xs_train=tcube["xs"].numpy(), ys_train=tcube["ys"].numpy()
+    0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
 )
 metrics_func = thm.MetricCollection(
     {
@@ -197,7 +197,7 @@ metrics_func = thm.MetricCollection(
 )
 
 # %%
-for _data in vcube:
+for _data in vdata:
     _pyhat, _ = run_one_episode(
         x=_data["xs"],
         classifier=classifier,
