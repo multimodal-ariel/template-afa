@@ -18,6 +18,7 @@ import tensordict as thd
 import torch as th
 import torch.utils.data as th_data
 import torchmetrics as thm
+import torch.distributions.utils
 import tqdm.auto as tqdm
 
 
@@ -225,11 +226,12 @@ def make_templates(
         _pyhats: th.Tensor = classifier.predict_proba(
             _ctxs.flatten(0, 1), _acts.flatten(0, 1)
         )
+        _lyhats: th.Tensor = torch.distributions.utils.probs_to_logits(_pyhats)
         _ys: th.Tensor = tys[:, None].expand(-1, n_cands).flatten(0, 1)
         # compute fitness function
         # (n_data, n_cands)
         _cels: th.Tensor = th.nn.functional.cross_entropy(
-            _pyhats, _ys, reduction="none"
+            _lyhats, _ys, reduction="none"
         ).unflatten(0, (len(txs), n_cands))
         # maximize fitness function
         # (n_cands, )
@@ -258,10 +260,11 @@ def compile_selector_dataset(
         ctxs=xs[:, None, :].expand(-1, n_tmpls, -1).flatten(0, 1),
         acts=tmpls[None, :, :].expand(n_data, -1, -1).flatten(0, 1),
     )
+    lyhats_: th.Tensor = torch.distributions.utils.probs_to_logits(pyhats_)
     ys_: th.Tensor = ys[:, None].expand(n_data, n_tmpls).flatten(0, 1)
     # (n_data, n_tmpls)
     cels: th.Tensor = th.nn.functional.cross_entropy(
-        pyhats_, ys_, reduction="none"
+        lyhats_, ys_, reduction="none"
     ).unflatten(0, (n_data, n_tmpls))
     rwds: th.Tensor = -cels - lmbda * th.sum(tmpls, dim=1)[None, :]
     # (n_data)
