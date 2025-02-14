@@ -776,7 +776,7 @@ vpcomp = precomp_rwds_for_tmpls(
 
 # %%
 print("greedy+oracle")
-acts, pyhats, ys, _ = eval_with_oracle_from_precomp(
+acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
     data=vdata, pcomp=vpcomp, tmpls=tmpls
 )
 metrics_func.reset()
@@ -785,6 +785,7 @@ metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().it
 metrics_func.reset()
 metrics_d.update(
     {
+        "rwd": th.mean(rwds).item(),
         "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
         "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
     }
