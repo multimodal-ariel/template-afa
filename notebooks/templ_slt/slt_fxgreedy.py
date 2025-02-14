@@ -146,14 +146,23 @@ class SubsetFeatureConcatXGBClassifier(
         pbar.close()
 
     def predict_proba(self, ctxs: th.Tensor, acts: th.Tensor) -> th.Tensor:
+        device: th.device = ctxs.device
+        ctxs = ctxs.to(device="cpu")
+        acts = acts.to(device="cpu")
         # (n, n_covs * 2)
         minps: th.Tensor = th.cat((ctxs, acts), dim=1)
         # (n, n_splits, n_labels)
         pyhats: th.Tensor = th.stack(
-            [_m.predict_proba(minps.numpy(force=True)) for _m in self._models], dim=1
+            [
+                th.as_tensor(
+                    _m.predict_proba(minps.numpy(force=True)), dtype=th.float32
+                )
+                for _m in self._models
+            ],
+            dim=1,
         )
         # (n, n_labels)
-        pyhats = th.mean(pyhats, dim=1)
+        pyhats = th.mean(pyhats, dim=1).to(device=device)
         return pyhats
 
     def __getitem__(self, key: tuple[int, ...]) -> None:
