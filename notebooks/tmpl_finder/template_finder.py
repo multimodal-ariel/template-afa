@@ -11,10 +11,10 @@ import os
 import pickle
 
 import matplotlib.pyplot as plt
+import mydatasets.common
 import numpy as np
 import tqdm.auto as tqdm
 from xgboost import XGBClassifier
-import mydatasets.common
 
 # %%
 """## Data"""
@@ -285,7 +285,6 @@ def eval_masks(
             out = np.zeros((N, M, classifiers[0].n_classes_), np.float32)
     for bi in range(0, N, bsize):
         Xbatch = X[bi : bi + bsize]
-        Ybatch = Y[bi : bi + bsize]
         if matched_B:
             Bbatch = B[bi : bi + bsize]
         else:
@@ -306,6 +305,7 @@ def eval_masks(
         if Y is None:
             out[bi : bi + bsize, ...] = preds
         else:
+            Ybatch = Y[bi : bi + bsize]
             out[bi : bi + bsize, ...] = np.stack(
                 [-np.log(preds[i, ..., y]) for i, y in enumerate(Ybatch)], 0
             )
@@ -460,10 +460,73 @@ print(np.mean(np.min(Xcosts_val, -1)))
 
 # %%
 # evaluate on held out set
-rprm = np.random.permutation(Xval.shape[0])[:1500]
 Xcosts_val = get_mask_losses(
     Xval, Yval, B_templates_vg, classifiers, featcost, bsize=256
 )
 print(np.mean(np.min(Xcosts_val, -1)))
+
+
+# %%
+def pred_mask(Xtrn, Ytrn, B, classifiers, featcost, bsize=256, classifier_filters=None):
+    pyhats_l = []
+    pbar = tqdm.trange(
+        0, Xtrn.shape[0], bsize, desc="mask loss", leave=True, dynamic_ncols=True
+    )
+    for si in pbar:
+        pyhats = eval_masks(
+            Xtrn[si : si + bsize],
+            B,
+            classifiers,
+            # Y=Ytrn[si : si + bsize],
+            classifier_filters=classifier_filters,
+            # matched_B=True,
+        )
+        pyhats_l.append(pyhats)
+    pbar.close()
+    return np.concatenate(pyhats_l, 0)
+
+
+# %%
+import pandas as pd
+import torch as th
+import torchmetrics as thm
+
+n_labels: int = len(np.unique(Yval))
+
+metrics_func = thm.MetricCollection(
+    {
+        "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+        "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+        "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+        "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+        "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+    }
+)
+
+# %%
+pyhats_val: np.ndarray = pred_mask(
+    Xval, Yval, B_templates_vg, classifiers, featcost, bsize=256
+)
+
+# %%
+pyhats_val = th.gather(
+    th.as_tensor(pyhats_val),
+    dim=1,
+    index=th.as_tensor(np.argmin(Xcosts_val, -1), dtype=th.long)[:, None, None].expand(
+        len(pyhats_val), -1, n_labels
+    ),
+).numpy()
+pyhats_val[:, 0, :]
+
+# %%
+metrics_func.reset()
+metrics_func.reset()
+metrics_func.update(
+    th.as_tensor(pyhats_val[:, :, None], dtype=th.float32),
+    th.as_tensor(Yval[:, None], dtype=th.long),
+)
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+print(pd.Series(metrics_d))
 
 # %%
