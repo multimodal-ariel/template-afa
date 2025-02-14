@@ -150,7 +150,7 @@ class SubsetFeatureConcatXGBClassifier(
         ctxs = ctxs.to(device="cpu")
         acts = acts.to(device="cpu")
         # (n, n_covs * 2)
-        minps: th.Tensor = th.cat((ctxs, acts), dim=1)
+        minps: th.Tensor = th.cat((ctxs * acts, acts), dim=1)
         # (n, n_splits, n_labels)
         pyhats: th.Tensor = th.stack(
             [
@@ -435,6 +435,7 @@ def precomp_rwds_for_tmpls(
         # (_bsz * n_cands, n_covs)
         _bctxs: th.Tensor = txs[_btidxs, None, :].expand(-1, n_cands, -1).flatten(0, 1)
         _bacts: th.Tensor = tmpls[None, :, :].expand(_bsz, -1, -1).flatten(0, 1)
+        _bctxs = _bctxs * _bacts
         # (_bsz * n_cands, n_labels)
         _bpyhats: th.Tensor = classifier.predict_proba(_bctxs, _bacts)
         _blyhats: th.Tensor = torch.distributions.utils.probs_to_logits(_bpyhats)
