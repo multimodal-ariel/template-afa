@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools as itrtls
 import math
 import os
-from typing import TypedDict
+from typing import Any, Optional, TypedDict
 
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
@@ -17,10 +17,11 @@ import numpy as np
 import pandas as pd
 import tensordict as thd
 import torch as th
+import torch.distributions.utils
 import torch.utils.data as th_data
 import torchmetrics as thm
 import tqdm.auto as tqdm
-import torch.distributions.utils
+import xgboost as xgbst
 
 
 # %%
@@ -79,6 +80,81 @@ class SubsetFeatureNaiveBayes(mymodels.classifiers.SubsetFeatureClassifier[None]
             output_probs,
             th.squeeze(th.dstack([th.sum(output_probs, dim=1)] * self.n_labels)),
         )
+
+    def __getitem__(self, key: tuple[int, ...]) -> None:
+        return None
+
+
+class SubsetFeatureConcatXGBClassifier(
+    mymodels.classifiers.SubsetFeatureClassifier[None]
+):
+    xgb_kwargs: dict[str, Any]
+    fraction_training_data_per_split: float
+    n_splits: int
+    n_tmpl_per_instance: int
+    rseed: Optional[int]
+
+    _models: list[xgbst.XGBClassifier]
+
+    def __init__(
+        self,
+        xs_train: np.ndarray,
+        ys_train: np.ndarray,
+        xgb_kwargs: dict[str, Any],
+        fraction_training_data_per_split: float,
+        n_splits: int,
+        n_tmpl_per_instance: int,
+        rseed: Optional[int] = None,
+    ):
+        super().__init__(n_experts_per_act=1, xs_train=xs_train, ys_train=ys_train)
+        self.xgb_kwargs = xgb_kwargs
+        self.fraction_training_data_per_split = fraction_training_data_per_split
+        self.n_splits = n_splits
+        self.n_tmpl_per_instance = n_tmpl_per_instance
+        self.rseed = rseed
+        self._models = [xgbst.XGBClassifier(**self.xgb_kwargs) for _ in range(n_splits)]
+
+    def fit_(self, tmpls: th.Tensor):
+        txs: th.Tensor = th.as_tensor(self.xs_train, dtype=th.float32)
+        tys: th.Tensor = th.as_tensor(self.ys_train)
+        pbar = tqdm.tqdm(
+            self._models, desc="model rsplit", dynamic_ncols=True, leave=True
+        )
+        for _m in pbar:
+            _n_data: int = math.ceil(len(txs) * self.fraction_training_data_per_split)
+            _idxs: th.Tensor = th.randint(0, len(txs), size=(_n_data,), dtype=th.long)
+            # (_n_data, n_tmpl_per_instance, n_covs)
+            _xs: th.Tensor = txs[_idxs, None, :].expand(
+                -1, self.n_tmpl_per_instance, -1
+            )
+            _fms: th.Tensor = th.stack(
+                [
+                    tmpls[
+                        th.multinomial(
+                            th.arange(0, len(tmpls), dtype=th.float32),
+                            self.n_tmpl_per_instance,
+                        )
+                    ]
+                    for _ in range(len(_xs))
+                ]
+            )
+            # (_n_data, n_tmple_per_instance, 2 * n_covs)
+            _minps: th.Tensor = th.cat((_xs * _fms, _fms), dim=2)
+            # (_n_data, n_tmpl_per_instance)
+            _ys: th.Tensor = tys[_idxs, None].expand(-1, self.n_tmpl_per_instance)
+            _m.fit(_minps.flatten(0, 1).numpy(), _ys.flatten(0, 1).numpy())
+        pbar.close()
+
+    def predict_proba(self, ctxs: th.Tensor, acts: th.Tensor) -> th.Tensor:
+        # (n, n_covs * 2)
+        minps: th.Tensor = th.cat((ctxs, acts), dim=1)
+        # (n, n_splits, n_labels)
+        pyhats: th.Tensor = th.stack(
+            [_m.predict_proba(minps.numpy(force=True)) for _m in self._models], dim=1
+        )
+        # (n, n_labels)
+        pyhats = th.mean(pyhats, dim=1)
+        return pyhats
 
     def __getitem__(self, key: tuple[int, ...]) -> None:
         return None
@@ -601,11 +677,17 @@ n_labels: int = len(th.unique(_tdata["ys"]))
 # %%
 _tdata_shuffle_idxs = th.randperm(len(_tdata))
 tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
+tdata = tdata[:6000]
 extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
 
 # %%
-classifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
-    xs_train=extdata["xs"].numpy(), ys_train=extdata["ys"].numpy()
+classifier = SubsetFeatureConcatXGBClassifier(
+    xs_train=extdata["xs"].numpy(),
+    ys_train=extdata["ys"].numpy(),
+    xgb_kwargs={"n_estimators": 40},
+    fraction_training_data_per_split=1.0,
+    n_splits=64,
+    n_tmpl_per_instance=4,
 )
 metrics_func = thm.MetricCollection(
     {
@@ -634,6 +716,9 @@ ctmpls: th.Tensor = make_template_candidates(
     min_features=1,
     max_features=max_features,
 )
+
+# %%
+classifier.fit_(tmpls=ctmpls)
 
 # %%
 tpcomp = precomp_rwds_for_tmpls(
