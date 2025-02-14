@@ -459,3 +459,11 @@ Xcosts_val = get_mask_losses(
 print(np.mean(np.min(Xcosts_val, -1)))
 
 # %%
+# evaluate on held out set
+rprm = np.random.permutation(Xval.shape[0])[:1500]
+Xcosts_val = get_mask_losses(
+    Xval, Yval, B_templates_vg, classifiers, featcost, bsize=256
+)
+print(np.mean(np.min(Xcosts_val, -1)))
+
+# %%
