@@ -388,7 +388,7 @@ def get_mask_losses(
             classifier_filters=classifier_filters,
         )
         Xcosts.append(nlls + mask_costs)
-
+    pbar.close()
     return np.concatenate(Xcosts, 0)
 
 
@@ -402,7 +402,8 @@ def vanilla_greedy_cost_selection(costs, k, selected=None):
     # Start selected set with the mask that gives to lowest avg cost
     if selected is None:
         selected = [np.argmax(np.mean(costs, 0))]
-    for i in range(1, k):
+    pbar = tqdm.trange(1, k, desc="vanilla greedy", leave=True, dynamic_ncols=True)
+    for i in pbar:
         # best possible cost for each instance with current set of masks
         selected_cost = np.min(costs[:, selected], -1, keepdims=True)
         print("{} {}".format(i, np.mean(selected_cost)))
@@ -412,6 +413,7 @@ def vanilla_greedy_cost_selection(costs, k, selected=None):
         if not np.any(mean_adj_cost < 0.0):
             return selected
         selected.append(np.argmin(mean_adj_cost))
+    pbar.close()
     return selected
 
 
