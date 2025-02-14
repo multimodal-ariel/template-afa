@@ -376,8 +376,10 @@ def get_mask_losses(
 
     bsize = 256
     Xcosts = []
-    for si in range(0, Xtrn.shape[0], bsize):
-        print(si)
+    pbar = tqdm.trange(
+        0, Xtrn.shape[0], bsize, desc="mask loss", leave=True, dynamic_ncols=True
+    )
+    for si in pbar:
         nlls = eval_masks(
             Xtrn[si : si + bsize],
             B,
