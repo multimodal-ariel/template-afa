@@ -516,7 +516,7 @@ pyhats_val = th.gather(
         len(pyhats_val), -1, n_labels
     ),
 ).numpy()
-pyhats_val[:, 0, :]
+pyhats_val = pyhats_val[:, 0, :]
 
 # %%
 metrics_func.reset()
