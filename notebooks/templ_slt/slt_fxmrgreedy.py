@@ -86,7 +86,7 @@ class SubsetFeatureNaiveBayes(mymodels.classifiers.SubsetFeatureClassifier[None]
 
 
 class SubsetFeatureConcatXGBClassifier(
-    mymodels.classifiers.SubsetFeatureClassifier[None]
+    mymodels.classifiers.SubsetFeatureConcatClassifier[None]
 ):
     xgb_kwargs: dict[str, Any]
     fraction_training_data_per_split: float
@@ -114,7 +114,7 @@ class SubsetFeatureConcatXGBClassifier(
         self.rseed = rseed
         self._models = [xgbst.XGBClassifier(**self.xgb_kwargs) for _ in range(n_splits)]
 
-    def fit_(self, tmpls: th.Tensor):
+    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
         txs: th.Tensor = th.as_tensor(self.xs_train, dtype=th.float32)
         tys: th.Tensor = th.as_tensor(self.ys_train)
         pbar = tqdm.tqdm(
@@ -129,9 +129,9 @@ class SubsetFeatureConcatXGBClassifier(
             )
             _fms: th.Tensor = th.stack(
                 [
-                    tmpls[
+                    acts_tmpls[
                         th.multinomial(
-                            th.arange(0, len(tmpls), dtype=th.float32),
+                            th.arange(0, len(acts_tmpls), dtype=th.float32),
                             self.n_tmpl_per_instance,
                         )
                     ]
@@ -144,6 +144,7 @@ class SubsetFeatureConcatXGBClassifier(
             _ys: th.Tensor = tys[_idxs, None].expand(-1, self.n_tmpl_per_instance)
             _m.fit(_minps.flatten(0, 1).numpy(), _ys.flatten(0, 1).numpy())
         pbar.close()
+        return dict()
 
     def predict_proba(self, ctxs: th.Tensor, acts: th.Tensor) -> th.Tensor:
         device: th.device = ctxs.device
@@ -285,7 +286,7 @@ def eval_with_oracle_from_precomp(
 def make_template_candidates(
     n_covs: int,
     init_fidx: int,
-    n_cands: int,
+    n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
 ) -> th.Tensor:
@@ -297,7 +298,7 @@ def make_template_candidates(
             min_features - 1, n_covs if max_features is None else max_features
         )
     ]
-    n_cands = min(n_cands, sum(bincnt_fcs_l))
+    n_cands: int = min(n_cands_targ, sum(bincnt_fcs_l))
     bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
     ps: th.Tensor = bincnt_fcs / th.sum(bincnt_fcs)
     ps = ps.to(dtype=th.float64)
@@ -358,7 +359,7 @@ def make_template_candidates(
 def _mutate_tmpls(
     tmpls_prv: th.Tensor,
     init_fidx: int,
-    n_cands: int,
+    n_cands_targ: int,
     min_features: int,
 ) -> set[tuple[int, ...]]:
     # new candidate pool set
@@ -368,9 +369,9 @@ def _mutate_tmpls(
     # previous template pool and exclude those that has no feature to mutate from
     tmpls_prv = tmpls_prv[th.sum(tmpls_prv, dim=1) - min_features > 0]
     # mutate templates
-    pbar = tqdm.trange(n_cands, desc="mutate tmpl_prv")
+    pbar = tqdm.trange(n_cands_targ, desc="mutate tmpl_prv")
     for _ in pbar:
-        if len(fcs_set) >= n_cands:
+        if len(fcs_set) >= n_cands_targ:
             break
         # randomly choose an existing template to mutate from
         _tmpl_prv: th.Tensor = tmpls_prv[int(th.randint(0, len(tmpls_prv), ()).item())]
@@ -401,7 +402,7 @@ def _fill_fcs_set_with_random_tmpls(
     fcs_set: set[tuple[int, ...]],
     n_covs: int,
     init_fidx: int,
-    n_cands: int,
+    n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
 ) -> list[set[tuple[int, ...]]]:
@@ -412,7 +413,7 @@ def _fill_fcs_set_with_random_tmpls(
         set() for _ in range(min_features - 1, max_features)
     ]
     [fcs_sets_by_bins[len(_fc) - min_features].add(_fc) for _fc in fcs_set]
-    if len(fcs_set) >= n_cands:
+    if len(fcs_set) >= n_cands_targ:
         return fcs_sets_by_bins
     # compute maximum feature combinations allowed in each bin
     bincnt_fcs: th.Tensor = th.as_tensor(
@@ -433,7 +434,7 @@ def _fill_fcs_set_with_random_tmpls(
     ps: th.Tensor = bincnt_fcs / th.sum(bincnt_fcs)
     ps = ps.to(dtype=th.float64)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
-        th.multinomial(ps, n_cands - len(fcs_set), replacement=True),
+        th.multinomial(ps, n_cands_targ - len(fcs_set), replacement=True),
         minlength=len(bincnt_fcs),
     )
     # in case number of actions in any of the bin exceeds maximum number of actions
@@ -485,14 +486,14 @@ def update_template_candidates(
     ctmpls: th.Tensor,
     slctd_ms: th.Tensor,
     init_fidx: int,
-    n_cands: int,
+    n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
 ) -> th.Tensor:
     fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
         tmpls_prv=ctmpls[slctd_ms],
         init_fidx=init_fidx,
-        n_cands=n_cands,
+        n_cands_targ=n_cands_targ,
         min_features=min_features,
     )
     n_covs: int = ctmpls.shape[1]
@@ -500,13 +501,13 @@ def update_template_candidates(
         fcs_set=fcs_set,
         n_covs=n_covs,
         init_fidx=init_fidx,
-        n_cands=n_cands,
+        n_cands_targ=n_cands_targ,
         min_features=min_features,
         max_features=max_features,
     )
     # from fcomb to act
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
-    n_cands = min(n_cands, len(fcs_l))
+    n_cands: int = min(n_cands_targ, len(fcs_l))
     ctmpls_new: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
     for _i, _fc in enumerate(fcs_l):
         ctmpls_new[_i, _fc] = 1
@@ -670,6 +671,39 @@ def make_templates(
     return tmpls, slctd_ms
 
 
+def make_templates_reduce_features(
+    tdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    n_tmpls_targ: int,
+    n_cands_targ: int,
+    min_features: int,
+    max_features: Optional[int],
+    min_features_init: int,
+    feature_decrement: int,
+    lmbda: float,
+    bsz: int,
+    vdata: Optional[thd.TensorDict],
+):
+    n_covs: int = classifier.n_covs
+    ctmpls: th.Tensor = make_template_candidates(
+        n_covs=n_covs,
+        init_fidx=init_fidx,
+        n_cands_targ=n_cands_targ,
+        min_features=min_features_init,
+        max_features=max_features,
+    )
+    n_cands: int = len(ctmpls)
+    tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+        tmpls=ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+    )
+    tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls_targ)
+    allfcombs_l: list[tuple[int, ...]] = [
+        tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+    ]
+    n_tmpls: int = len(tmpls)
+
+
 # %%
 data_name: str = "cube_20_0.3"
 tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
@@ -699,7 +733,7 @@ bsz: int = 1024
 ctmpls: th.Tensor = make_template_candidates(
     n_covs=n_covs,
     init_fidx=init_fidx,
-    n_cands=n_cands_targ,
+    n_cands_targ=n_cands_targ,
     min_features=1,
     max_features=10,
 )
@@ -749,7 +783,7 @@ min_features: int = min_features_init
 ctmpls: th.Tensor = make_template_candidates(
     n_covs=n_covs,
     init_fidx=init_fidx,
-    n_cands=n_cands_targ,
+    n_cands_targ=n_cands_targ,
     min_features=min_features,
     max_features=max_features,
 )
@@ -800,7 +834,7 @@ for _minfeats in tqdm.trange(
         ctmpls=ctmpls,
         slctd_ms=slctd_ms,
         init_fidx=init_fidx,
-        n_cands=n_cands_targ,
+        n_cands_targ=n_cands_targ,
         min_features=_minfeats,
         max_features=_maxfeats,
     )
