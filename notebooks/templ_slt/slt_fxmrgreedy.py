@@ -368,7 +368,7 @@ def _mutate_tmpls(
         tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls_prv
     }
     # previous template pool and exclude those that has no feature to mutate from
-    tmpls_prv = tmpls_prv[th.sum(tmpls_prv, dim=1) - min_features - 1 > 0]
+    tmpls_prv = tmpls_prv[th.sum(tmpls_prv, dim=1) - min_features > 0]
     # mutate templates
     pbar = tqdm.trange(n_cands, desc="mutate tmpl_prv")
     for _ in pbar:
@@ -378,7 +378,7 @@ def _mutate_tmpls(
         _tmpl_prv: th.Tensor = tmpls_prv[int(th.randint(0, len(tmpls_prv), ()).item())]
         _nfeats_prv: int = int(th.sum(_tmpl_prv).item())
         # compute number of features that can be mutated
-        _nfeats_mutavail = _nfeats_prv - min_features - 1
+        _nfeats_mutavail = _nfeats_prv - min_features
         # make copy of selected template
         _tmpl: th.Tensor = _tmpl_prv.clone()
         # number of features to mutate
@@ -414,6 +414,8 @@ def _fill_fcs_set_with_random_tmpls(
         set() for _ in range(min_features - 1, max_features)
     ]
     [fcs_sets_by_bins[len(_fc) - min_features].add(_fc) for _fc in fcs_set]
+    if len(fcs_set) >= n_cands:
+        return fcs_sets_by_bins
     # compute maximum feature combinations allowed in each bin
     bincnt_fcs: th.Tensor = th.as_tensor(
         [
@@ -437,9 +439,7 @@ def _fill_fcs_set_with_random_tmpls(
         minlength=len(bincnt_fcs),
     )
     # in case number of actions in any of the bin exceeds maximum number of actions
-    _curr_bincnts: th.Tensor = bincnt_fcs - th.as_tensor(
-        [len(_fcs_set) for _fcs_set in fcs_sets_by_bins], dtype=th.long
-    )
+    _curr_bincnts: th.Tensor = nfc_from_each_binned_fcs
     while th.any(_curr_bincnts > bincnt_fcs):
         _tmp_ps: th.Tensor = th.where(
             _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
@@ -460,14 +460,14 @@ def _fill_fcs_set_with_random_tmpls(
         _curr_bincnts = _curr_bincnts - _realloc_cnts + _tmp_bincnts
     nfc_from_each_binned_fcs = _curr_bincnts
     # make unique feature combination
-    fcs_sets_by_bins: list[set[tuple[int, ...]]] = [set() for _ in bincnt_fcs]
     for _k, (_count, _fcs_set) in enumerate(
         zip(nfc_from_each_binned_fcs, fcs_sets_by_bins)
     ):
         if _count == 0:
             continue
+        _init_fcs_set_len: int = len(_fcs_set)
         _nfeats: int = _k + min_features
-        while len(_fcs_set) < _count:
+        while len(_fcs_set) - _init_fcs_set_len < _count:
             _fc_l: list[int] = th.multinomial(
                 th.ones((n_covs,)), num_samples=_nfeats
             ).tolist()
@@ -835,8 +835,7 @@ metrics_func = thm.MetricCollection(
 init_fidx: int = 6
 n_tmpls: int = 64
 n_cands: int = 5_000
-lmbda: float = 0.0
-max_features: int | None = None
+lmbda: float = 0.3
 # tau_rwd: float = 0.01
 bsz: int = 1024
 
@@ -845,8 +844,8 @@ ctmpls: th.Tensor = make_template_candidates(
     n_covs=n_covs,
     init_fidx=init_fidx,
     n_cands=n_cands,
-    min_features=1,
-    max_features=max_features,
+    min_features=8,
+    max_features=10,
 )
 
 # %%
@@ -900,6 +899,78 @@ ctmpls: th.Tensor = make_template_candidates(
 
 # # %%
 # classifier.fit_(tmpls=ctmpls)
+
+# %%
+tpcomp = precomp_rwds_for_tmpls(
+    ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+)
+
+# %%
+tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+allfcombs_l: list[tuple[int, ...]] = [
+    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+]
+n_tmpls = len(tmpls)
+
+# %%
+print("greedy+random")
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
+        x=_data["xs"],
+        classifier=classifier,
+        init_fidx=init_fidx,
+        allfcombs_l=allfcombs_l,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
+    }
+)
+print(pd.Series(metrics_d))
+
+# %%
+vpcomp = precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+)
+
+# %%
+print("greedy+oracle")
+acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+    data=vdata, pcomp=vpcomp, tmpls=tmpls
+)
+metrics_func.reset()
+metrics_func.update(pyhats[:, :, None], ys[:, None])
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "rwd": th.mean(rwds).item(),
+        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+    }
+)
+print(pd.Series(metrics_d))
+
+# %%
+ctmpls = update_template_candidates(
+    ctmpls=ctmpls,
+    slctd_ms=slctd_ms,
+    init_fidx=init_fidx,
+    n_cands=n_cands,
+    min_features=6,
+    max_features=10,
+)
 
 # %%
 tpcomp = precomp_rwds_for_tmpls(
