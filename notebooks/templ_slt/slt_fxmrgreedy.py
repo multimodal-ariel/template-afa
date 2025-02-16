@@ -670,152 +670,11 @@ def make_templates(
     return tmpls, slctd_ms
 
 
-@th.no_grad()
-def compile_selector_dataset(
-    tdata: thd.TensorDict,
-    tpcomp: thd.TensorDict,
-    slctd_ms: th.Tensor,
-) -> thd.TensorDict:
-    # (n_data, n_covs)
-    xs: th.Tensor = tdata["xs"]
-    # (n_data, )
-    ys: th.Tensor = tdata["ys"]
-    # (n_data, n_tmpls, n_labels)
-    pyhats: th.Tensor = tpcomp["pyhats"][:, slctd_ms, :]
-    # (n_data, n_tmpls)
-    cels: th.Tensor = tpcomp["cels"][:, slctd_ms]
-    rwds: th.Tensor = tpcomp["rwds"][:, slctd_ms]
-    # (n_data, )
-    slbls: th.Tensor = th.argmax(rwds, dim=1)
-    # # (n_data, n_tmpls)
-    # slbls: th.Tensor = th.softmax(rwds / tau_rwd, dim=1)
-    # bundle tensors into tensordict
-    stdata = thd.TensorDict(
-        {
-            "xs": xs,
-            "ys": ys,
-            "pyhats": pyhats,
-            "cels": cels,
-            "rwds": rwds,
-            "slbls": slbls,
-        }
-    ).auto_batch_size_(1)
-    return stdata
-
-
-class _TrainState(TypedDict):
-    selector: SoftmaxSelector
-    opt: th.optim.Optimizer
-    n_trial_itr: int
-    n_fit_itr: int
-    opt_step: int
-
-
-@th.no_grad()
-def _make_fit_bsinps(
-    bstdata: thd.TensorDict, init_fidx: int, tmpls: th.Tensor
-) -> th.Tensor:
-    bsz: int = len(bstdata)
-    n_tmpls: int = len(tmpls)
-    # (bsz, )
-    btmplidxs: th.Tensor = th.randint(0, n_tmpls, (bsz,))
-    # (bsz, n_covs)
-    bxs: th.Tensor = bstdata["xs"]
-    bfms: th.Tensor = tmpls[btmplidxs].to(device=bxs.device)
-    n_covs: int = bxs.shape[1]
-    # randomly drop features
-    bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs))
-    bnms[:, init_fidx] = 1
-    bnms = th.cat((bnms, bnms), dim=1).to(device=bxs.device)
-    # (bsz, 2 * n_covs)
-    bsinps: th.Tensor = th.cat((bxs, bfms), dim=1)
-    bsinps = bsinps * bnms
-    return bsinps
-
-
-def _fit_iter(
-    tstate: _TrainState,
-    tloader: th_data.DataLoader,
-    init_fidx: int,
-    tmpls: th.Tensor,
-    pbar: tqdm.tqdm,
-    plf: pl.Fabric,
-) -> dict[str, float]:
-    selector: SoftmaxSelector = tstate["selector"].train().to(device=plf.device)
-    opt: th.optim.Optimizer = tstate["opt"]
-    slosses_l: list[th.Tensor] = list()
-    for bstdata in tloader:
-        bstdata: thd.TensorDict
-        bstdata = bstdata.to(device=plf.device)
-        # (bsz, 2 * n_covs)
-        bsinps: th.Tensor = _make_fit_bsinps(
-            bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
-        )
-        # (bsz, n_tmpls)
-        bsouts: th.Tensor = selector(bsinps, to_probs=False)
-        # compute selector loss
-        bslosses: th.Tensor = th.nn.functional.cross_entropy(
-            bsouts, bstdata["slbls"], reduction="none"
-        )
-        bsloss: th.Tensor = th.mean(bslosses)
-        # update selector parameter
-        opt.zero_grad()
-        bsloss.backward()
-        opt.step()
-        # track metrics
-        slosses_l.append(bslosses.detach().to(device="cpu"))
-        bmetrics_d: dict[str, float] = {
-            "bsloss": bsloss.item(),
-        }
-        pbar.set_postfix(bmetrics_d)
-        plf.log_dict(
-            mylib.utils.add_prefix_to_dict(bmetrics_d, "train"), step=tstate["opt_step"]
-        )
-        tstate["opt_step"] = tstate["opt_step"] + 1
-    sloss_avg: th.Tensor = th.mean(th.cat(slosses_l, dim=0))
-    metrics_d: dict[str, float] = {"sloss_avg": sloss_avg.item()}
-    return metrics_d
-
-
-def fit(
-    tstate: _TrainState,
-    stdata: thd.TensorDict,
-    init_fidx: int,
-    tmpls: th.Tensor,
-    n_iter: int,
-    bsz: int,
-    plf: pl.Fabric,
-):
-    tloader = th_data.DataLoader(
-        stdata,  # type: ignore
-        batch_size=bsz,
-        shuffle=True,
-        collate_fn=lambda x: x,
-    )
-    pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
-    for _ in pbar:
-        metrics_d: dict[str, float] = _fit_iter(
-            tstate=tstate,
-            tloader=tloader,
-            init_fidx=init_fidx,
-            tmpls=tmpls,
-            pbar=pbar,
-            plf=plf,
-        )
-        plf.log_dict(
-            mylib.utils.add_prefix_to_dict(metrics_d, "train"), step=tstate["n_fit_itr"]
-        )
-        tstate["n_fit_itr"] = tstate["n_fit_itr"] + 1
-    pbar.close()
-
-
 # %%
 data_name: str = "cube_20_0.3"
 tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 n_covs: int = tdata["xs"].shape[1]
 n_labels: int = len(th.unique(tdata["ys"]))
-
-# %%
 classifier = SubsetFeatureNaiveBayes(
     0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
 )
@@ -836,8 +695,7 @@ n_cands: int = 5_000
 lmbda: float = 0.3
 # tau_rwd: float = 0.01
 bsz: int = 1024
-
-# %%
+# NOTE vanilla greedy
 ctmpls: th.Tensor = make_template_candidates(
     n_covs=n_covs,
     init_fidx=init_fidx,
@@ -845,8 +703,234 @@ ctmpls: th.Tensor = make_template_candidates(
     min_features=8,
     max_features=10,
 )
+tpcomp = precomp_rwds_for_tmpls(
+    ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+)
+tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+allfcombs_l: list[tuple[int, ...]] = [
+    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+]
+n_tmpls = len(tmpls)
+vpcomp = precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+)
+print("***vanilla greedy***")
+# NOTE greedy + random
+print("greedy+random")
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
+        x=_data["xs"],
+        classifier=classifier,
+        init_fidx=init_fidx,
+        allfcombs_l=allfcombs_l,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
+    }
+)
+print(pd.Series(metrics_d))
+# NOTE greedy+oracle
+print("greedy+oracle")
+acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+    data=vdata, pcomp=vpcomp, tmpls=tmpls
+)
+metrics_func.reset()
+metrics_func.update(pyhats[:, :, None], ys[:, None])
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "rwd": th.mean(rwds).item(),
+        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+    }
+)
+print(pd.Series(metrics_d))
 
 # %%
+# NOTE DROP FEATURE METHOD
+init_fidx: int = 6
+n_tmpls: int = 64
+n_cands_targ: int = 10_000
+min_features_targ: int = 1
+min_features_init: int = 8
+max_features: int = 10
+feature_decrement: int = 2
+lmbda: float = 0.3
+# tau_rwd: float = 0.01
+bsz: int = 1024
+min_features: int = min_features_init
+ctmpls: th.Tensor = make_template_candidates(
+    n_covs=n_covs,
+    init_fidx=init_fidx,
+    n_cands=n_cands_targ,
+    min_features=min_features,
+    max_features=max_features,
+)
+n_cands: int = len(ctmpls)
+tpcomp = precomp_rwds_for_tmpls(
+    ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+)
+tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+allfcombs_l: list[tuple[int, ...]] = [
+    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+]
+n_tmpls = len(tmpls)
+vpcomp = precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+)
+print("initialize template candidates")
+print("greedy+oracle")
+acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+    data=vdata, pcomp=vpcomp, tmpls=tmpls
+)
+metrics_func.reset()
+metrics_func.update(pyhats[:, :, None], ys[:, None])
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "rwd": th.mean(rwds).item(),
+        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+    }
+)
+print(pd.Series(metrics_d))
+
+# %%
+print("start decreasing features")
+min_features: int = min_features - feature_decrement
+max_features: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
+for _minfeats in tqdm.trange(min_features, min_features_targ, -feature_decrement):
+    _maxfeats: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
+    ctmpls = update_template_candidates(
+        ctmpls=ctmpls,
+        slctd_ms=slctd_ms,
+        init_fidx=init_fidx,
+        n_cands=n_cands,
+        min_features=_minfeats,
+        max_features=_maxfeats,
+    )
+    tpcomp = precomp_rwds_for_tmpls(
+        ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+    )
+    tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+    allfcombs_l: list[tuple[int, ...]] = [
+        tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+    ]
+    n_tmpls = len(tmpls)
+    vpcomp = precomp_rwds_for_tmpls(
+        tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+    )
+    print(f"greedy+oracle min: {_minfeats} max:{_maxfeats}")
+    acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+        data=vdata, pcomp=vpcomp, tmpls=tmpls
+    )
+    metrics_func.reset()
+    metrics_func.update(pyhats[:, :, None], ys[:, None])
+    metrics_d: dict[str, float] = {
+        k: v.item() for k, v in metrics_func.compute().items()
+    }
+    metrics_func.reset()
+    metrics_d.update(
+        {
+            "rwd": th.mean(rwds).item(),
+            "feature observed": th.mean(
+                th.sum(acts, dim=1).to(dtype=th.float32)
+            ).item(),
+            "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+        }
+    )
+    print(pd.Series(metrics_d))
+
+
+# %%
+# NOTE fragment of code that reduce min and max features manually
+# ctmpls = update_template_candidates(
+#     ctmpls=ctmpls,
+#     slctd_ms=slctd_ms,
+#     init_fidx=init_fidx,
+#     n_cands=n_cands,
+#     min_features=6,
+#     max_features=10,
+# )
+
+# # %%
+# tpcomp = precomp_rwds_for_tmpls(
+#     ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+# )
+
+# # %%
+# tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+# allfcombs_l: list[tuple[int, ...]] = [
+#     tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+# ]
+# n_tmpls = len(tmpls)
+
+# # %%
+# print("greedy+random")
+# metrics_func.reset()
+# snfobsd_l: list[int] = list()
+# snfcomb_l: list[int] = list()
+# for _data in vdata:
+#     _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
+#         x=_data["xs"],
+#         classifier=classifier,
+#         init_fidx=init_fidx,
+#         allfcombs_l=allfcombs_l,
+#     )
+#     snfobsd_l.append(len(_fobsd_l))
+#     snfcomb_l.append(len(_fcomb))
+#     metrics_func.update(
+#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+#     )
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
+#         "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
+#     }
+# )
+# print(pd.Series(metrics_d))
+
+# # %%
+# vpcomp = precomp_rwds_for_tmpls(
+#     tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+# )
+
+# # %%
+# print("greedy+oracle")
+# acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+#     data=vdata, pcomp=vpcomp, tmpls=tmpls
+# )
+# metrics_func.reset()
+# metrics_func.update(pyhats[:, :, None], ys[:, None])
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "rwd": th.mean(rwds).item(),
+#         "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+#         "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+#     }
+# )
+# print(pd.Series(metrics_d))
+
+# %%
+# NOTE code snippet for big5_C_cls
 # data_name: str = "big5_C_cls"
 # _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 # n_covs: int = _tdata["xs"].shape[1]
@@ -898,139 +982,147 @@ ctmpls: th.Tensor = make_template_candidates(
 # # %%
 # classifier.fit_(tmpls=ctmpls)
 
-# %%
-tpcomp = precomp_rwds_for_tmpls(
-    ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
 
 # %%
-tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
-allfcombs_l: list[tuple[int, ...]] = [
-    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
-]
-n_tmpls = len(tmpls)
+# NOTE broken code to fit selector
+# @th.no_grad()
+# def compile_selector_dataset(
+#     tdata: thd.TensorDict,
+#     tpcomp: thd.TensorDict,
+#     slctd_ms: th.Tensor,
+# ) -> thd.TensorDict:
+#     # (n_data, n_covs)
+#     xs: th.Tensor = tdata["xs"]
+#     # (n_data, )
+#     ys: th.Tensor = tdata["ys"]
+#     # (n_data, n_tmpls, n_labels)
+#     pyhats: th.Tensor = tpcomp["pyhats"][:, slctd_ms, :]
+#     # (n_data, n_tmpls)
+#     cels: th.Tensor = tpcomp["cels"][:, slctd_ms]
+#     rwds: th.Tensor = tpcomp["rwds"][:, slctd_ms]
+#     # (n_data, )
+#     slbls: th.Tensor = th.argmax(rwds, dim=1)
+#     # # (n_data, n_tmpls)
+#     # slbls: th.Tensor = th.softmax(rwds / tau_rwd, dim=1)
+#     # bundle tensors into tensordict
+#     stdata = thd.TensorDict(
+#         {
+#             "xs": xs,
+#             "ys": ys,
+#             "pyhats": pyhats,
+#             "cels": cels,
+#             "rwds": rwds,
+#             "slbls": slbls,
+#         }
+#     ).auto_batch_size_(1)
+#     return stdata
 
-# %%
-print("greedy+random")
-metrics_func.reset()
-snfobsd_l: list[int] = list()
-snfcomb_l: list[int] = list()
-for _data in vdata:
-    _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
-        x=_data["xs"],
-        classifier=classifier,
-        init_fidx=init_fidx,
-        allfcombs_l=allfcombs_l,
-    )
-    snfobsd_l.append(len(_fobsd_l))
-    snfcomb_l.append(len(_fcomb))
-    metrics_func.update(
-        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-    )
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
-        "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
-    }
-)
-print(pd.Series(metrics_d))
 
-# %%
-vpcomp = precomp_rwds_for_tmpls(
-    tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
+# class _TrainState(TypedDict):
+#     selector: SoftmaxSelector
+#     opt: th.optim.Optimizer
+#     n_trial_itr: int
+#     n_fit_itr: int
+#     opt_step: int
 
-# %%
-print("greedy+oracle")
-acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
-    data=vdata, pcomp=vpcomp, tmpls=tmpls
-)
-metrics_func.reset()
-metrics_func.update(pyhats[:, :, None], ys[:, None])
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "rwd": th.mean(rwds).item(),
-        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-    }
-)
-print(pd.Series(metrics_d))
 
-# %%
-ctmpls = update_template_candidates(
-    ctmpls=ctmpls,
-    slctd_ms=slctd_ms,
-    init_fidx=init_fidx,
-    n_cands=n_cands,
-    min_features=6,
-    max_features=10,
-)
+# @th.no_grad()
+# def _make_fit_bsinps(
+#     bstdata: thd.TensorDict, init_fidx: int, tmpls: th.Tensor
+# ) -> th.Tensor:
+#     bsz: int = len(bstdata)
+#     n_tmpls: int = len(tmpls)
+#     # (bsz, )
+#     btmplidxs: th.Tensor = th.randint(0, n_tmpls, (bsz,))
+#     # (bsz, n_covs)
+#     bxs: th.Tensor = bstdata["xs"]
+#     bfms: th.Tensor = tmpls[btmplidxs].to(device=bxs.device)
+#     n_covs: int = bxs.shape[1]
+#     # randomly drop features
+#     bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs))
+#     bnms[:, init_fidx] = 1
+#     bnms = th.cat((bnms, bnms), dim=1).to(device=bxs.device)
+#     # (bsz, 2 * n_covs)
+#     bsinps: th.Tensor = th.cat((bxs, bfms), dim=1)
+#     bsinps = bsinps * bnms
+#     return bsinps
 
-# %%
-tpcomp = precomp_rwds_for_tmpls(
-    ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
 
-# %%
-tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
-allfcombs_l: list[tuple[int, ...]] = [
-    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
-]
-n_tmpls = len(tmpls)
+# def _fit_iter(
+#     tstate: _TrainState,
+#     tloader: th_data.DataLoader,
+#     init_fidx: int,
+#     tmpls: th.Tensor,
+#     pbar: tqdm.tqdm,
+#     plf: pl.Fabric,
+# ) -> dict[str, float]:
+#     selector: SoftmaxSelector = tstate["selector"].train().to(device=plf.device)
+#     opt: th.optim.Optimizer = tstate["opt"]
+#     slosses_l: list[th.Tensor] = list()
+#     for bstdata in tloader:
+#         bstdata: thd.TensorDict
+#         bstdata = bstdata.to(device=plf.device)
+#         # (bsz, 2 * n_covs)
+#         bsinps: th.Tensor = _make_fit_bsinps(
+#             bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
+#         )
+#         # (bsz, n_tmpls)
+#         bsouts: th.Tensor = selector(bsinps, to_probs=False)
+#         # compute selector loss
+#         bslosses: th.Tensor = th.nn.functional.cross_entropy(
+#             bsouts, bstdata["slbls"], reduction="none"
+#         )
+#         bsloss: th.Tensor = th.mean(bslosses)
+#         # update selector parameter
+#         opt.zero_grad()
+#         bsloss.backward()
+#         opt.step()
+#         # track metrics
+#         slosses_l.append(bslosses.detach().to(device="cpu"))
+#         bmetrics_d: dict[str, float] = {
+#             "bsloss": bsloss.item(),
+#         }
+#         pbar.set_postfix(bmetrics_d)
+#         plf.log_dict(
+#             mylib.utils.add_prefix_to_dict(bmetrics_d, "train"), step=tstate["opt_step"]
+#         )
+#         tstate["opt_step"] = tstate["opt_step"] + 1
+#     sloss_avg: th.Tensor = th.mean(th.cat(slosses_l, dim=0))
+#     metrics_d: dict[str, float] = {"sloss_avg": sloss_avg.item()}
+#     return metrics_d
 
-# %%
-print("greedy+random")
-metrics_func.reset()
-snfobsd_l: list[int] = list()
-snfcomb_l: list[int] = list()
-for _data in vdata:
-    _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
-        x=_data["xs"],
-        classifier=classifier,
-        init_fidx=init_fidx,
-        allfcombs_l=allfcombs_l,
-    )
-    snfobsd_l.append(len(_fobsd_l))
-    snfcomb_l.append(len(_fcomb))
-    metrics_func.update(
-        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-    )
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
-        "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
-    }
-)
-print(pd.Series(metrics_d))
 
-# %%
-vpcomp = precomp_rwds_for_tmpls(
-    tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
+# def fit(
+#     tstate: _TrainState,
+#     stdata: thd.TensorDict,
+#     init_fidx: int,
+#     tmpls: th.Tensor,
+#     n_iter: int,
+#     bsz: int,
+#     plf: pl.Fabric,
+# ):
+#     tloader = th_data.DataLoader(
+#         stdata,  # type: ignore
+#         batch_size=bsz,
+#         shuffle=True,
+#         collate_fn=lambda x: x,
+#     )
+#     pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
+#     for _ in pbar:
+#         metrics_d: dict[str, float] = _fit_iter(
+#             tstate=tstate,
+#             tloader=tloader,
+#             init_fidx=init_fidx,
+#             tmpls=tmpls,
+#             pbar=pbar,
+#             plf=plf,
+#         )
+#         plf.log_dict(
+#             mylib.utils.add_prefix_to_dict(metrics_d, "train"), step=tstate["n_fit_itr"]
+#         )
+#         tstate["n_fit_itr"] = tstate["n_fit_itr"] + 1
+#     pbar.close()
 
-# %%
-print("greedy+oracle")
-acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
-    data=vdata, pcomp=vpcomp, tmpls=tmpls
-)
-metrics_func.reset()
-metrics_func.update(pyhats[:, :, None], ys[:, None])
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "rwd": th.mean(rwds).item(),
-        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-    }
-)
-print(pd.Series(metrics_d))
 
 # %%
 # stdata = compile_selector_dataset(tdata=tcube, tpcomp=tpcomp, slctd_ms=slctd_ms)
