@@ -617,9 +617,13 @@ def precomp_rwds_for_tmpls(
     return tpcomp
 
 
-def make_templates(
-    tpcomp: thd.TensorDict, ctmpls: th.Tensor, n_tmpls: int
-) -> tuple[th.Tensor, th.Tensor]:
+def make_templates_from_candidates(
+    tpcomp: thd.TensorDict,
+    ctmpls: th.Tensor,
+    n_tmpls: int,
+    plf: pl.Fabric,
+    log_prefix: Optional[str] = "mk_tmpl",
+) -> th.Tensor:
     # (n_data, n_cands)
     rwds: th.Tensor = tpcomp["rwds"]
     costs: th.Tensor = -rwds
@@ -634,12 +638,14 @@ def make_templates(
             _fitns: th.Tensor = th.mean(costs, dim=0)
             _slctd: int = int(th.argmin(_fitns).item())
             slctd_ms[_slctd] = True
-            pbar.set_postfix(
-                {
-                    "cost": th.mean(th.min(costs[:, slctd_ms], dim=1)[0]).item(),
-                    "fitness": _fitns[_slctd].item(),
-                }
-            )
+            metrics_d: dict[str, float] = {
+                "cost": th.mean(th.min(costs[:, slctd_ms], dim=1)[0]).item(),
+                "fitness": _fitns[_slctd].item(),
+            }
+            pbar.set_postfix(metrics_d)
+            if log_prefix is not None:
+                metrics_d = mylib.utils.add_prefix_to_dict(metrics_d, log_prefix)
+            plf.log_dict(metrics_d)
             continue
         # compute currently selected template set cost for each instance
         # (n_data, )
@@ -660,15 +666,105 @@ def make_templates(
         _slctd: int = int(th.argmin(_fitns).item())
         slctd_ms[_slctd] = True
         # update progress bar
-        pbar.set_postfix(
-            {
-                "cost": th.mean(th.min(costs[:, slctd_ms], dim=1)[0]).item(),
-                "fitness": _fitns[_slctd].item(),
-            }
-        )
+        metrics_d: dict[str, float] = {
+            "cost": th.mean(th.min(costs[:, slctd_ms], dim=1)[0]).item(),
+            "fitness": _fitns[_slctd].item(),
+        }
+        pbar.set_postfix(metrics_d)
+        if log_prefix is not None:
+            metrics_d = mylib.utils.add_prefix_to_dict(metrics_d, log_prefix)
+        plf.log_dict(metrics_d)
     pbar.close()
     tmpls: th.Tensor = ctmpls[slctd_ms]
-    return tmpls, slctd_ms
+    return tmpls
+
+
+# %%
+def make_templates_vanilla(
+    tdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    n_tmpls: int,
+    n_cands: int,
+    min_features: int,
+    max_features: Optional[int],
+    lmbda: float,
+    bsz: int,
+    vdata: Optional[thd.TensorDict],
+    metrics_func: thm.MetricCollection,
+    plf: pl.Fabric,
+) -> tuple[th.Tensor, th.Tensor]:
+    metrics_func.reset()
+    n_covs: int = classifier.n_covs
+    _i: int = 0
+    max_features = n_covs if max_features is None else max_features
+    # NOTE init. candidate templates
+    ctmpls: th.Tensor = make_template_candidates(
+        n_covs=n_covs,
+        init_fidx=init_fidx,
+        n_cands_targ=n_cands,
+        min_features=min_features,
+        max_features=max_features,
+    )
+    tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+        tmpls=ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+    )
+    tmpls, slctd_ms = make_templates_from_candidates(
+        tpcomp=tpcomp,
+        ctmpls=ctmpls,
+        n_tmpls=n_tmpls,
+        plf=plf,
+        log_prefix="vanilla_mktmpl",
+    )
+    if vdata is not None:
+        metrics_d: dict[str, float] = _eval(
+            data=vdata,
+            classifier=classifier,
+            tmpls=tmpls,
+            lmbda=lmbda,
+            bsz=bsz,
+            metrics_func=metrics_func,
+        )
+        metrics_d.update(
+            {
+                "minfeats": min_features_init,
+                "maxfeats": max_features,
+            }
+        )
+        plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_vanilla"), _i)
+    return ctmpls, slctd_ms
+
+
+# %%
+def _eval(
+    data: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    tmpls: th.Tensor,
+    lmbda: float,
+    bsz: int,
+    metrics_func: thm.MetricCollection,
+) -> dict[str, float]:
+    vpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+        tmpls=tmpls, data=data, classifier=classifier, lmbda=lmbda, bsz=bsz
+    )
+    acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+        data=data, pcomp=vpcomp, tmpls=tmpls
+    )
+    metrics_func.update(pyhats[:, :, None], ys[:, None])
+    metrics_d: dict[str, float] = {
+        k: v.item() for k, v in metrics_func.compute().items()
+    }
+    metrics_func.reset()
+    metrics_d.update(
+        {
+            "rwd": th.mean(rwds).item(),
+            "feature observed": th.mean(
+                th.sum(acts, dim=1).to(dtype=th.float32)
+            ).item(),
+            "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+        }
+    )
+    return metrics_d
 
 
 def make_templates_reduce_features(
@@ -677,31 +773,102 @@ def make_templates_reduce_features(
     init_fidx: int,
     n_tmpls_targ: int,
     n_cands_targ: int,
-    min_features: int,
-    max_features: Optional[int],
+    min_features_targ: int,
+    max_features_targ: Optional[int],
     min_features_init: int,
     feature_decrement: int,
     lmbda: float,
     bsz: int,
     vdata: Optional[thd.TensorDict],
-):
+    metrics_func: thm.MetricCollection,
+    plf: pl.Fabric,
+) -> tuple[th.Tensor, th.Tensor]:
+    metrics_func.reset()
     n_covs: int = classifier.n_covs
+    _i: int = 0
+    max_features_targ = n_covs if max_features_targ is None else max_features_targ
+    # NOTE init. candidate templates
     ctmpls: th.Tensor = make_template_candidates(
         n_covs=n_covs,
         init_fidx=init_fidx,
         n_cands_targ=n_cands_targ,
         min_features=min_features_init,
-        max_features=max_features,
+        max_features=max_features_targ,
     )
-    n_cands: int = len(ctmpls)
     tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
         tmpls=ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
     )
-    tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls_targ)
-    allfcombs_l: list[tuple[int, ...]] = [
-        tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
-    ]
-    n_tmpls: int = len(tmpls)
+    tmpls, slctd_ms = make_templates_from_candidates(
+        tpcomp=tpcomp,
+        ctmpls=ctmpls,
+        n_tmpls=n_tmpls_targ,
+        plf=plf,
+        log_prefix=f"reduce_mktmpl{_i}",
+    )
+    if vdata is not None:
+        metrics_d: dict[str, float] = _eval(
+            data=vdata,
+            classifier=classifier,
+            tmpls=tmpls,
+            lmbda=lmbda,
+            bsz=bsz,
+            metrics_func=metrics_func,
+        )
+        metrics_d.update(
+            {
+                "minfeats": min_features_init,
+                "maxfeats": max_features_targ,
+            }
+        )
+        plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
+    # NOTE start decreasing features
+    for _minfeats in tqdm.trange(
+        min_features_init - feature_decrement,
+        min_features_targ - 1,
+        -feature_decrement,
+        desc="reduce features",
+        leave=False,
+        dynamic_ncols=True,
+    ):
+        _i = _i + 1
+        _maxfeats: int = min(
+            max_features_targ, int(th.max(th.sum(tmpls, dim=1)).item())
+        )
+        ctmpls = update_template_candidates(
+            ctmpls=ctmpls,
+            slctd_ms=slctd_ms,
+            init_fidx=init_fidx,
+            n_cands_targ=n_cands_targ,
+            min_features=_minfeats,
+            max_features=_maxfeats,
+        )
+        tpcomp = precomp_rwds_for_tmpls(
+            ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+        )
+        tmpls, slctd_ms = make_templates_from_candidates(
+            tpcomp=tpcomp,
+            ctmpls=ctmpls,
+            n_tmpls=n_tmpls_targ,
+            plf=plf,
+            log_prefix=f"reduce_mktmpl{_i}",
+        )
+        if vdata is not None:
+            metrics_d: dict[str, float] = _eval(
+                data=vdata,
+                classifier=classifier,
+                tmpls=tmpls,
+                lmbda=lmbda,
+                bsz=bsz,
+                metrics_func=metrics_func,
+            )
+            metrics_d.update(
+                {
+                    "minfeats": _minfeats,
+                    "maxfeats": _maxfeats,
+                }
+            )
+            plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
+    return ctmpls, slctd_ms
 
 
 # %%
@@ -722,154 +889,228 @@ metrics_func = thm.MetricCollection(
     }
 )
 
-#  %%
-init_fidx: int = 6
-n_tmpls: int = 64
-n_cands_targ: int = 10_000
-lmbda: float = 0.3
-# tau_rwd: float = 0.01
-bsz: int = 1024
-# NOTE vanilla greedy
-ctmpls: th.Tensor = make_template_candidates(
-    n_covs=n_covs,
-    init_fidx=init_fidx,
-    n_cands_targ=n_cands_targ,
-    min_features=1,
-    max_features=10,
-)
-tpcomp = precomp_rwds_for_tmpls(
-    ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
-tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
-allfcombs_l: list[tuple[int, ...]] = [
-    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
-]
-n_tmpls = len(tmpls)
-vpcomp = precomp_rwds_for_tmpls(
-    tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
-print("***vanilla greedy***")
-# NOTE greedy+oracle
-print("greedy+oracle")
-acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
-    data=vdata, pcomp=vpcomp, tmpls=tmpls
-)
-metrics_func.reset()
-metrics_func.update(pyhats[:, :, None], ys[:, None])
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "rwd": th.mean(rwds).item(),
-        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-    }
-)
-print(pd.Series(metrics_d))
-
 # %%
-# NOTE DROP FEATURE METHOD
 init_fidx: int = 6
-n_tmpls: int = 64
+n_tmpls_targ: int = 64
 n_cands_targ: int = 10_000
 min_features_targ: int = 1
-min_features_init: int = 8
-max_features: int = 10
+max_features_targ: Optional[int] = None
+min_features_init: int = 10
 feature_decrement: int = 2
 lmbda: float = 0.3
-# tau_rwd: float = 0.01
 bsz: int = 1024
-min_features: int = min_features_init
-ctmpls: th.Tensor = make_template_candidates(
-    n_covs=n_covs,
-    init_fidx=init_fidx,
-    n_cands_targ=n_cands_targ,
-    min_features=min_features,
-    max_features=max_features,
-)
-n_cands: int = len(ctmpls)
-tpcomp = precomp_rwds_for_tmpls(
-    ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
-tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
-allfcombs_l: list[tuple[int, ...]] = [
-    tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
-]
-n_tmpls = len(tmpls)
-vpcomp = precomp_rwds_for_tmpls(
-    tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-)
-print("initialize template candidates")
-print("greedy+oracle")
-acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
-    data=vdata, pcomp=vpcomp, tmpls=tmpls
-)
-metrics_func.reset()
-metrics_func.update(pyhats[:, :, None], ys[:, None])
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "rwd": th.mean(rwds).item(),
-        "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-        "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-    }
-)
-print(pd.Series(metrics_d))
 
 # %%
-print("start decreasing features")
-min_features: int = min_features - feature_decrement
-max_features: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
-for _minfeats in tqdm.trange(
-    min_features,
-    min_features_targ - 1,
-    -feature_decrement,
-    desc="reduce features",
-    leave=False,
-    dynamic_ncols=True,
-):
-    _maxfeats: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
-    ctmpls = update_template_candidates(
-        ctmpls=ctmpls,
-        slctd_ms=slctd_ms,
-        init_fidx=init_fidx,
-        n_cands_targ=n_cands_targ,
-        min_features=_minfeats,
-        max_features=_maxfeats,
-    )
-    n_cands: int = len(ctmpls)
-    tpcomp = precomp_rwds_for_tmpls(
-        ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-    )
-    tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
-    allfcombs_l: list[tuple[int, ...]] = [
-        tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
-    ]
-    n_tmpls = len(tmpls)
-    vpcomp = precomp_rwds_for_tmpls(
-        tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
-    )
-    print(f"greedy+oracle min: {_minfeats} max:{_maxfeats}")
-    acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
-        data=vdata, pcomp=vpcomp, tmpls=tmpls
-    )
-    metrics_func.reset()
-    metrics_func.update(pyhats[:, :, None], ys[:, None])
-    metrics_d: dict[str, float] = {
-        k: v.item() for k, v in metrics_func.compute().items()
-    }
-    metrics_func.reset()
-    metrics_d.update(
-        {
-            "rwd": th.mean(rwds).item(),
-            "feature observed": th.mean(
-                th.sum(acts, dim=1).to(dtype=th.float32)
-            ).item(),
-            "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-        }
-    )
-    print(pd.Series(metrics_d))
+# configure logger and ckpt path
+output_dir: str = os.path.join("outputs", "run", data_name, "slt_fxmrgreedy")
+os.makedirs(output_dir, exist_ok=True)
+tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
+csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
+
+# %%
+plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="cpu")
+
+# %%
+ctmpls, slctd_ms = make_templates_vanilla(
+    tdata=tdata,
+    classifier=classifier,
+    init_fidx=init_fidx,
+    n_tmpls=n_tmpls_targ,
+    n_cands=n_cands_targ,
+    min_features=min_features_targ,
+    max_features=max_features_targ,
+    lmbda=lmbda,
+    bsz=bsz,
+    vdata=vdata,
+    metrics_func=metrics_func,
+    plf=plf,
+)
+
+# %%
+ctmpls, slctd_ms = make_templates_reduce_features(
+    tdata=tdata,
+    classifier=classifier,
+    init_fidx=init_fidx,
+    n_tmpls_targ=n_tmpls_targ,
+    n_cands_targ=n_cands_targ,
+    min_features_targ=min_features_targ,
+    max_features_targ=max_features_targ,
+    min_features_init=min_features_init,
+    feature_decrement=feature_decrement,
+    lmbda=lmbda,
+    bsz=bsz,
+    vdata=vdata,
+    metrics_func=metrics_func,
+    plf=plf,
+)
+
+# %%
+# NOTE original manual version
+# data_name: str = "cube_20_0.3"
+# tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+# n_covs: int = tdata["xs"].shape[1]
+# n_labels: int = len(th.unique(tdata["ys"]))
+# classifier = SubsetFeatureNaiveBayes(
+#     0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
+# )
+# metrics_func = thm.MetricCollection(
+#     {
+#         "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+#         "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+#         "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+#         "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+#         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+#     }
+# )
+
+# #  %%
+# init_fidx: int = 6
+# n_tmpls: int = 64
+# n_cands_targ: int = 10_000
+# lmbda: float = 0.3
+# # tau_rwd: float = 0.01
+# bsz: int = 1024
+# # NOTE vanilla greedy
+# ctmpls: th.Tensor = make_template_candidates(
+#     n_covs=n_covs,
+#     init_fidx=init_fidx,
+#     n_cands_targ=n_cands_targ,
+#     min_features=1,
+#     max_features=10,
+# )
+# tpcomp = precomp_rwds_for_tmpls(
+#     ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+# )
+# tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+# allfcombs_l: list[tuple[int, ...]] = [
+#     tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+# ]
+# n_tmpls = len(tmpls)
+# vpcomp = precomp_rwds_for_tmpls(
+#     tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+# )
+# print("***vanilla greedy***")
+# # NOTE greedy+oracle
+# print("greedy+oracle")
+# acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+#     data=vdata, pcomp=vpcomp, tmpls=tmpls
+# )
+# metrics_func.reset()
+# metrics_func.update(pyhats[:, :, None], ys[:, None])
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "rwd": th.mean(rwds).item(),
+#         "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+#         "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+#     }
+# )
+# print(pd.Series(metrics_d))
+
+# # %%
+# # NOTE DROP FEATURE METHOD
+# init_fidx: int = 6
+# n_tmpls: int = 64
+# n_cands_targ: int = 10_000
+# min_features_targ: int = 1
+# min_features_init: int = 8
+# max_features: int = 10
+# feature_decrement: int = 2
+# lmbda: float = 0.3
+# # tau_rwd: float = 0.01
+# bsz: int = 1024
+# min_features: int = min_features_init
+# ctmpls: th.Tensor = make_template_candidates(
+#     n_covs=n_covs,
+#     init_fidx=init_fidx,
+#     n_cands_targ=n_cands_targ,
+#     min_features=min_features,
+#     max_features=max_features,
+# )
+# n_cands: int = len(ctmpls)
+# tpcomp = precomp_rwds_for_tmpls(
+#     ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+# )
+# tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+# allfcombs_l: list[tuple[int, ...]] = [
+#     tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+# ]
+# n_tmpls = len(tmpls)
+# vpcomp = precomp_rwds_for_tmpls(
+#     tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+# )
+# print("initialize template candidates")
+# print("greedy+oracle")
+# acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+#     data=vdata, pcomp=vpcomp, tmpls=tmpls
+# )
+# metrics_func.reset()
+# metrics_func.update(pyhats[:, :, None], ys[:, None])
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "rwd": th.mean(rwds).item(),
+#         "feature observed": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+#         "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+#     }
+# )
+# print(pd.Series(metrics_d))
+
+# # %%
+# print("start decreasing features")
+# min_features: int = min_features - feature_decrement
+# max_features: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
+# for _minfeats in tqdm.trange(
+#     min_features,
+#     min_features_targ - 1,
+#     -feature_decrement,
+#     desc="reduce features",
+#     leave=False,
+#     dynamic_ncols=True,
+# ):
+#     _maxfeats: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
+#     ctmpls = update_template_candidates(
+#         ctmpls=ctmpls,
+#         slctd_ms=slctd_ms,
+#         init_fidx=init_fidx,
+#         n_cands_targ=n_cands_targ,
+#         min_features=_minfeats,
+#         max_features=_maxfeats,
+#     )
+#     n_cands: int = len(ctmpls)
+#     tpcomp = precomp_rwds_for_tmpls(
+#         ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+#     )
+#     tmpls, slctd_ms = make_templates(tpcomp=tpcomp, ctmpls=ctmpls, n_tmpls=n_tmpls)
+#     allfcombs_l: list[tuple[int, ...]] = [
+#         tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls
+#     ]
+#     n_tmpls = len(tmpls)
+#     vpcomp = precomp_rwds_for_tmpls(
+#         tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+#     )
+#     print(f"greedy+oracle min: {_minfeats} max:{_maxfeats}")
+#     acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+#         data=vdata, pcomp=vpcomp, tmpls=tmpls
+#     )
+#     metrics_func.reset()
+#     metrics_func.update(pyhats[:, :, None], ys[:, None])
+#     metrics_d: dict[str, float] = {
+#         k: v.item() for k, v in metrics_func.compute().items()
+#     }
+#     metrics_func.reset()
+#     metrics_d.update(
+#         {
+#             "rwd": th.mean(rwds).item(),
+#             "feature observed": th.mean(
+#                 th.sum(acts, dim=1).to(dtype=th.float32)
+#             ).item(),
+#             "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+#         }
+#     )
+#     print(pd.Series(metrics_d))
 
 
 # %%
