@@ -106,6 +106,11 @@ class SubsetFeatureClassifier(th.nn.Module, ABC, Generic[MT]):
         """
 
 
+class SubsetFeatureConcatClassifier(SubsetFeatureClassifier[MT]):
+    @abstractmethod
+    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]: ...
+
+
 class _SubsetFeatureSKLClassifier(SubsetFeatureClassifier[SKLMT]):
     make_model_func: Callable[[], SKLMT]
     use_cp: bool
