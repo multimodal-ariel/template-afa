@@ -691,7 +691,7 @@ metrics_func = thm.MetricCollection(
 #  %%
 init_fidx: int = 6
 n_tmpls: int = 64
-n_cands: int = 5_000
+n_cands_targ: int = 10_000
 lmbda: float = 0.3
 # tau_rwd: float = 0.01
 bsz: int = 1024
@@ -699,8 +699,8 @@ bsz: int = 1024
 ctmpls: th.Tensor = make_template_candidates(
     n_covs=n_covs,
     init_fidx=init_fidx,
-    n_cands=n_cands,
-    min_features=8,
+    n_cands=n_cands_targ,
+    min_features=1,
     max_features=10,
 )
 tpcomp = precomp_rwds_for_tmpls(
@@ -715,32 +715,6 @@ vpcomp = precomp_rwds_for_tmpls(
     tmpls=tmpls, data=vdata, classifier=classifier, lmbda=lmbda, bsz=bsz
 )
 print("***vanilla greedy***")
-# NOTE greedy + random
-print("greedy+random")
-metrics_func.reset()
-snfobsd_l: list[int] = list()
-snfcomb_l: list[int] = list()
-for _data in vdata:
-    _pyhat, _fobsd_l, _fcomb = run_one_random_episode(
-        x=_data["xs"],
-        classifier=classifier,
-        init_fidx=init_fidx,
-        allfcombs_l=allfcombs_l,
-    )
-    snfobsd_l.append(len(_fobsd_l))
-    snfcomb_l.append(len(_fcomb))
-    metrics_func.update(
-        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-    )
-metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-metrics_func.reset()
-metrics_d.update(
-    {
-        "feature observed": th.mean(th.as_tensor(snfobsd_l), dtype=th.float32).item(),
-        "feature used": th.mean(th.as_tensor(snfcomb_l), dtype=th.float32).item(),
-    }
-)
-print(pd.Series(metrics_d))
 # NOTE greedy+oracle
 print("greedy+oracle")
 acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
@@ -813,16 +787,24 @@ print(pd.Series(metrics_d))
 print("start decreasing features")
 min_features: int = min_features - feature_decrement
 max_features: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
-for _minfeats in tqdm.trange(min_features, min_features_targ, -feature_decrement):
+for _minfeats in tqdm.trange(
+    min_features,
+    min_features_targ - 1,
+    -feature_decrement,
+    desc="reduce features",
+    leave=False,
+    dynamic_ncols=True,
+):
     _maxfeats: int = min(max_features, int(th.max(th.sum(tmpls, dim=1)).item()))
     ctmpls = update_template_candidates(
         ctmpls=ctmpls,
         slctd_ms=slctd_ms,
         init_fidx=init_fidx,
-        n_cands=n_cands,
+        n_cands=n_cands_targ,
         min_features=_minfeats,
         max_features=_maxfeats,
     )
+    n_cands: int = len(ctmpls)
     tpcomp = precomp_rwds_for_tmpls(
         ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
     )
