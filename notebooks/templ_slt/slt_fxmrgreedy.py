@@ -297,9 +297,7 @@ def make_template_candidates(
             min_features - 1, n_covs if max_features is None else max_features
         )
     ]
-    assert n_cands <= sum(
-        bincnt_fcs_l
-    ), "n_cands is larger than all possible feature combinations"
+    n_cands = min(n_cands, sum(bincnt_fcs_l))
     bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
     ps: th.Tensor = bincnt_fcs / th.sum(bincnt_fcs)
     ps = ps.to(dtype=th.float64)
@@ -507,9 +505,9 @@ def update_template_candidates(
         max_features=max_features,
     )
     # from fcomb to act
-    ctmpls_new: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
-    assert len(ctmpls_new) == len(fcs_l)
+    n_cands = min(n_cands, len(fcs_l))
+    ctmpls_new: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
     for _i, _fc in enumerate(fcs_l):
         ctmpls_new[_i, _fc] = 1
     return ctmpls_new
