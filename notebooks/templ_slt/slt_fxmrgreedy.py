@@ -680,6 +680,39 @@ def make_templates_from_candidates(
 
 
 # %%
+def _eval(
+    data: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    tmpls: th.Tensor,
+    lmbda: float,
+    bsz: int,
+    metrics_func: thm.MetricCollection,
+) -> dict[str, float]:
+    vpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+        tmpls=tmpls, data=data, classifier=classifier, lmbda=lmbda, bsz=bsz
+    )
+    acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
+        data=data, pcomp=vpcomp, tmpls=tmpls
+    )
+    metrics_func.reset()
+    metrics_func.update(pyhats[:, :, None], ys[:, None])
+    metrics_d: dict[str, float] = {
+        k: v.item() for k, v in metrics_func.compute().items()
+    }
+    metrics_func.reset()
+    metrics_d.update(
+        {
+            "rwd": th.mean(rwds).item(),
+            "feature observed": th.mean(
+                th.sum(acts, dim=1).to(dtype=th.float32)
+            ).item(),
+            "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
+        }
+    )
+    return metrics_d
+
+
+# %%
 def make_templates_vanilla(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -694,7 +727,6 @@ def make_templates_vanilla(
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, th.Tensor]:
-    metrics_func.reset()
     n_covs: int = classifier.n_covs
     _i: int = 0
     max_features = n_covs if max_features is None else max_features
@@ -706,6 +738,8 @@ def make_templates_vanilla(
         min_features=min_features,
         max_features=max_features,
     )
+    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        classifier.fit_(ctmpls)
     tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
         tmpls=ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
     )
@@ -735,38 +769,6 @@ def make_templates_vanilla(
     return ctmpls, slctd_ms
 
 
-# %%
-def _eval(
-    data: thd.TensorDict,
-    classifier: mymodels.classifiers.SubsetFeatureClassifier,
-    tmpls: th.Tensor,
-    lmbda: float,
-    bsz: int,
-    metrics_func: thm.MetricCollection,
-) -> dict[str, float]:
-    vpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
-        tmpls=tmpls, data=data, classifier=classifier, lmbda=lmbda, bsz=bsz
-    )
-    acts, pyhats, ys, rwds = eval_with_oracle_from_precomp(
-        data=data, pcomp=vpcomp, tmpls=tmpls
-    )
-    metrics_func.update(pyhats[:, :, None], ys[:, None])
-    metrics_d: dict[str, float] = {
-        k: v.item() for k, v in metrics_func.compute().items()
-    }
-    metrics_func.reset()
-    metrics_d.update(
-        {
-            "rwd": th.mean(rwds).item(),
-            "feature observed": th.mean(
-                th.sum(acts, dim=1).to(dtype=th.float32)
-            ).item(),
-            "feature used": th.mean(th.sum(acts, dim=1).to(dtype=th.float32)).item(),
-        }
-    )
-    return metrics_d
-
-
 def make_templates_reduce_features(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -783,7 +785,6 @@ def make_templates_reduce_features(
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, th.Tensor]:
-    metrics_func.reset()
     n_covs: int = classifier.n_covs
     _i: int = 0
     max_features_targ = n_covs if max_features_targ is None else max_features_targ
@@ -795,6 +796,8 @@ def make_templates_reduce_features(
         min_features=min_features_init,
         max_features=max_features_targ,
     )
+    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        classifier.fit_(ctmpls)
     tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
         tmpls=ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
     )
@@ -842,6 +845,8 @@ def make_templates_reduce_features(
             min_features=_minfeats,
             max_features=_maxfeats,
         )
+        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+            classifier.fit_(ctmpls)
         tpcomp = precomp_rwds_for_tmpls(
             ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
         )
