@@ -28,3 +28,4 @@ ipykernel
 ipywidgets
 ucimlrepo
 kaggle
+standard-imghdr
