@@ -752,6 +752,8 @@ def make_templates_vanilla(
         plf=plf,
         log_prefix="vanilla_mktmpl",
     )
+    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        classifier.fit_(tmpls)
     if vdata is not None:
         metrics_d: dict[str, float] = _eval(
             data=vdata,
@@ -810,6 +812,8 @@ def make_templates_reduce_features(
         plf=plf,
         log_prefix=f"reduce_mktmpl{_i}",
     )
+    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        classifier.fit_(tmpls)
     if vdata is not None:
         metrics_d: dict[str, float] = _eval(
             data=vdata,
@@ -859,6 +863,8 @@ def make_templates_reduce_features(
             plf=plf,
             log_prefix=f"reduce_mktmpl{_i}",
         )
+        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+            classifier.fit_(tmpls)
         if vdata is not None:
             metrics_d: dict[str, float] = _eval(
                 data=vdata,
