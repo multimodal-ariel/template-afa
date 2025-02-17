@@ -3,26 +3,23 @@ from __future__ import annotations
 import itertools as itrtls
 import math
 import os
-from typing import Any, Optional, TypedDict
+from dataclasses import dataclass
+from typing import Any, Optional
 
-from attr import dataclass
 import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
-import mydatasets.aaco
 import mylib.utils
 import mymodels.classifiers
 import mymodels.nn
 import mymodels.protocols
-import numpy as np
 import tensordict as thd
 import torch as th
 import torch.distributions.utils
 import torchmetrics as thm
 import tqdm.auto as tqdm
-import xgboost as xgbst
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 
 @dataclass
@@ -38,6 +35,12 @@ class MainConf:
     feature_decrement: int
     lmbda: float
     bsz: int
+    max_tdata: Optional[int]
+
+
+OmegaConf.register_new_resolver(
+    name="get_cls", resolver=lambda cls: hd.utils.get_class(cls)
+)
 
 
 def run_one_random_episode(
@@ -106,8 +109,7 @@ def make_template_candidates(
     ]
     n_cands: int = min(n_cands_targ, sum(bincnt_fcs_l))
     bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
-    ps: th.Tensor = bincnt_fcs / th.sum(bincnt_fcs)
-    ps = ps.to(dtype=th.float64)
+    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_cands, replacement=True), minlength=len(bincnt_fcs)
     )
@@ -117,8 +119,7 @@ def make_template_candidates(
         _tmp_ps: th.Tensor = th.where(
             _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
         )
-        _tmp_ps = _tmp_ps / th.sum(_tmp_ps)
-        _tmp_ps = _tmp_ps.to(dtype=th.float64)
+        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
         _realloc_cnts: th.Tensor = th.where(
             _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
         )
@@ -221,8 +222,6 @@ def _fill_fcs_set_with_random_tmpls(
         set() for _ in range(min_features - 1, max_features)
     ]
     [fcs_sets_by_bins[len(_fc) - min_features].add(_fc) for _fc in fcs_set]
-    if len(fcs_set) >= n_cands_targ:
-        return fcs_sets_by_bins
     # compute maximum feature combinations allowed in each bin
     bincnt_fcs: th.Tensor = th.as_tensor(
         [
@@ -234,13 +233,17 @@ def _fill_fcs_set_with_random_tmpls(
             )
         ]
     )
+    n_cands_targ = (
+        n_cands_targ if n_cands_targ <= th.sum(bincnt_fcs) else int(th.sum(bincnt_fcs))
+    )
+    if len(fcs_set) >= n_cands_targ:
+        return fcs_sets_by_bins
     # subtract existing fcs from the bins
     bincnt_fcs = bincnt_fcs - th.as_tensor(
         list(map(len, fcs_sets_by_bins)), dtype=th.long
     )
     # sample number of fcs to add to existing feature combinations
-    ps: th.Tensor = bincnt_fcs / th.sum(bincnt_fcs)
-    ps = ps.to(dtype=th.float64)
+    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_cands_targ - len(fcs_set), replacement=True),
         minlength=len(bincnt_fcs),
@@ -251,8 +254,7 @@ def _fill_fcs_set_with_random_tmpls(
         _tmp_ps: th.Tensor = th.where(
             _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
         )
-        _tmp_ps = _tmp_ps / th.sum(_tmp_ps)
-        _tmp_ps = _tmp_ps.to(dtype=th.float64)
+        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
         _realloc_cnts: th.Tensor = th.where(
             _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
         )
@@ -644,16 +646,29 @@ def main(cfg: MainConf):
     # _delay_import()
     output_dir: str = HydraConfig.get().runtime.output_dir
     # make dataset
-    tdata: thd.TensorDict
+    _tdata: thd.TensorDict
     vdata: thd.TensorDict
     tstdata: thd.TensorDict
-    tdata, vdata, tstdata = hd.utils.call(cfg.data)
-    n_covs: int = tdata["xs"].shape[1]
-    n_labels: int = len(th.unique(tdata["ys"]))
+    _tdata, vdata, tstdata = hd.utils.call(cfg.data)
+    n_covs: int = _tdata["xs"].shape[1]
+    n_labels: int = len(th.unique(_tdata["ys"]))
+    # split training data into two for classifier and afa
+    _tdata_shuffle_idxs = th.randperm(
+        len(_tdata), generator=th.Generator().manual_seed(279)
+    )
+    tdata: thd.TensorDict
+    extdata: thd.TensorDict
+    print(_tdata)
+    print(_tdata_shuffle_idxs)
+    tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
+    extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
+    # use only a subset of for speed
+    if cfg.max_tdata is not None and cfg.max_tdata < len(tdata):
+        tdata = tdata[: cfg.max_tdata]
     # make classifier
     classifier: mymodels.classifiers.SubsetFeatureClassifier
     classifier = hd.utils.instantiate(
-        cfg.classifier, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
+        cfg.classifier, xs_train=extdata["xs"].numpy(), ys_train=extdata["ys"].numpy()
     )
     metrics_func = thm.MetricCollection(
         {
