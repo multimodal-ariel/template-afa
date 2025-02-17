@@ -223,49 +223,6 @@ def run_one_random_episode(
     return pyhats[0], fobsd_l, fcomb
 
 
-@th.no_grad()
-def run_one_episode(
-    x: th.Tensor,
-    classifier: mymodels.classifiers.SubsetFeatureClassifier,
-    selector: SoftmaxSelector,
-    init_fidx: int,
-    allfcombs_l: list[tuple[int, ...]],
-    plf: pl.Fabric,
-) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
-    selector.eval().to(device=plf.device)
-    fobsd_l: list[int] = [init_fidx]
-    fcomb: tuple[int, ...] | None = None
-    # repeat feature acquisition until all features in template has been acquired.
-    for _ in itrtls.count():
-        # make feature bit mask
-        _m: th.Tensor = th.zeros_like(x)
-        _m[fobsd_l] = 1
-        # forward prop. selector
-        _sinps: th.Tensor = th.cat((x, _m))[None, :].to(device=plf.device)
-        _souts: th.Tensor = selector(_sinps, to_probs=False)
-        # choose a template
-        _fcomb_idx: int = int(th.argmax(_souts[0]).item())
-        _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
-        # ident. unacquired features
-        _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
-        if len(_tmp_fcomb) == 0:
-            fcomb = _tmpl_fcomb
-            break
-        # randomly choose a feature to acquire
-        _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
-        # add acquired feature to fcomb
-        fobsd_l.append(_tmp_fcomb[_tmp_fcomb_idx])
-        # terminate acq. if all features in template has been satisfied
-        if all([fidx in fobsd_l for fidx in _tmpl_fcomb]):
-            fcomb = _tmpl_fcomb
-            break
-    assert fcomb is not None
-    acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
-    acts[0, fcomb] = 1
-    pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
-    return pyhats[0], fobsd_l, fcomb
-
-
 def eval_with_oracle_from_precomp(
     data: thd.TensorDict, pcomp: thd.TensorDict, tmpls: th.Tensor
 ) -> tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor]:
@@ -300,8 +257,7 @@ def make_template_candidates(
     ]
     n_cands: int = min(n_cands_targ, sum(bincnt_fcs_l))
     bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
-    ps: th.Tensor = bincnt_fcs / th.sum(bincnt_fcs)
-    ps = ps.to(dtype=th.float64)
+    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_cands, replacement=True), minlength=len(bincnt_fcs)
     )
@@ -311,8 +267,7 @@ def make_template_candidates(
         _tmp_ps: th.Tensor = th.where(
             _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
         )
-        _tmp_ps = _tmp_ps / th.sum(_tmp_ps)
-        _tmp_ps = _tmp_ps.to(dtype=th.float64)
+        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
         _realloc_cnts: th.Tensor = th.where(
             _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
         )
@@ -415,8 +370,6 @@ def _fill_fcs_set_with_random_tmpls(
         set() for _ in range(min_features - 1, max_features)
     ]
     [fcs_sets_by_bins[len(_fc) - min_features].add(_fc) for _fc in fcs_set]
-    if len(fcs_set) >= n_cands_targ:
-        return fcs_sets_by_bins
     # compute maximum feature combinations allowed in each bin
     bincnt_fcs: th.Tensor = th.as_tensor(
         [
@@ -428,13 +381,17 @@ def _fill_fcs_set_with_random_tmpls(
             )
         ]
     )
+    n_cands_targ = (
+        n_cands_targ if n_cands_targ <= th.sum(bincnt_fcs) else int(th.sum(bincnt_fcs))
+    )
+    if len(fcs_set) >= n_cands_targ:
+        return fcs_sets_by_bins
     # subtract existing fcs from the bins
     bincnt_fcs = bincnt_fcs - th.as_tensor(
         list(map(len, fcs_sets_by_bins)), dtype=th.long
     )
     # sample number of fcs to add to existing feature combinations
-    ps: th.Tensor = bincnt_fcs / th.sum(bincnt_fcs)
-    ps = ps.to(dtype=th.float64)
+    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_cands_targ - len(fcs_set), replacement=True),
         minlength=len(bincnt_fcs),
@@ -445,8 +402,7 @@ def _fill_fcs_set_with_random_tmpls(
         _tmp_ps: th.Tensor = th.where(
             _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
         )
-        _tmp_ps = _tmp_ps / th.sum(_tmp_ps)
-        _tmp_ps = _tmp_ps.to(dtype=th.float64)
+        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
         _realloc_cnts: th.Tensor = th.where(
             _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
         )
@@ -830,14 +786,19 @@ def make_templates_reduce_features(
             }
         )
         plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
+    _minfeats_l: list[int] = [
+        _minfeats
+        for _minfeats in range(
+            min_features_init - feature_decrement,
+            min_features_targ - 1,
+            -feature_decrement,
+        )
+    ]
+    if min_features_targ not in _minfeats_l:
+        _minfeats_l.append(min_features_targ)
     # NOTE start decreasing features
-    for _minfeats in tqdm.trange(
-        min_features_init - feature_decrement,
-        min_features_targ - 1,
-        -feature_decrement,
-        desc="reduce features",
-        leave=False,
-        dynamic_ncols=True,
+    for _minfeats in tqdm.tqdm(
+        _minfeats_l, desc="reduce features", leave=False, dynamic_ncols=True
     ):
         _i = _i + 1
         _maxfeats: int = min(
@@ -1255,6 +1216,49 @@ tmpls = make_templates_reduce_features(
 
 # %%
 # NOTE broken code to fit selector
+# @th.no_grad()
+# def run_one_episode(
+#     x: th.Tensor,
+#     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+#     selector: SoftmaxSelector,
+#     init_fidx: int,
+#     allfcombs_l: list[tuple[int, ...]],
+#     plf: pl.Fabric,
+# ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+#     selector.eval().to(device=plf.device)
+#     fobsd_l: list[int] = [init_fidx]
+#     fcomb: tuple[int, ...] | None = None
+#     # repeat feature acquisition until all features in template has been acquired.
+#     for _ in itrtls.count():
+#         # make feature bit mask
+#         _m: th.Tensor = th.zeros_like(x)
+#         _m[fobsd_l] = 1
+#         # forward prop. selector
+#         _sinps: th.Tensor = th.cat((x, _m))[None, :].to(device=plf.device)
+#         _souts: th.Tensor = selector(_sinps, to_probs=False)
+#         # choose a template
+#         _fcomb_idx: int = int(th.argmax(_souts[0]).item())
+#         _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
+#         # ident. unacquired features
+#         _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
+#         if len(_tmp_fcomb) == 0:
+#             fcomb = _tmpl_fcomb
+#             break
+#         # randomly choose a feature to acquire
+#         _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
+#         # add acquired feature to fcomb
+#         fobsd_l.append(_tmp_fcomb[_tmp_fcomb_idx])
+#         # terminate acq. if all features in template has been satisfied
+#         if all([fidx in fobsd_l for fidx in _tmpl_fcomb]):
+#             fcomb = _tmpl_fcomb
+#             break
+#     assert fcomb is not None
+#     acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
+#     acts[0, fcomb] = 1
+#     pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
+#     return pyhats[0], fobsd_l, fcomb
+
+
 # @th.no_grad()
 # def compile_selector_dataset(
 #     tdata: thd.TensorDict,
