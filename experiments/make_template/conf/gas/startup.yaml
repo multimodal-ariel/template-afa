@@ -1,0 +1,30 @@
+hydra:
+  job:
+    name: gas
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: gas
+  to_normalize: true
+classifier:
+  _target_: _classifiers.SubsetFeatureConcatXGBClassifier
+  xgb_kwargs:
+    n_estimators: 40
+  fraction_training_data_per_split: 1.0
+  n_splits: 64
+  n_tmpl_per_instance: 4
+init_fidx: 6
+n_tmpls_targ: 128
+n_cands_targ: 10_000
+min_features_targ: 1
+max_features_targ: null
+min_features_init: 8
+feature_decrement: 2
+lmbda: 0.1
+bsz: 1024
+max_tdata: 30_000
