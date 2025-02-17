@@ -1,0 +1,1 @@
+`python train.py -m -cp=conf/cube/ -cn=startup hydra/launcher=joblib`
