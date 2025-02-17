@@ -118,7 +118,7 @@ class SubsetFeatureConcatXGBClassifier(
         txs: th.Tensor = th.as_tensor(self.xs_train, dtype=th.float32)
         tys: th.Tensor = th.as_tensor(self.ys_train)
         pbar = tqdm.tqdm(
-            self._models, desc="model rsplit", dynamic_ncols=True, leave=True
+            self._models, desc="model rsplit", dynamic_ncols=True, leave=False
         )
         for _m in pbar:
             _n_data: int = math.ceil(len(txs) * self.fraction_training_data_per_split)
@@ -369,7 +369,9 @@ def _mutate_tmpls(
     # previous template pool and exclude those that has no feature to mutate from
     tmpls_prv = tmpls_prv[th.sum(tmpls_prv, dim=1) - min_features > 0]
     # mutate templates
-    pbar = tqdm.trange(n_cands_targ, desc="mutate tmpl_prv")
+    pbar = tqdm.trange(
+        n_cands_targ, desc="mutate tmpl_prv", dynamic_ncols=True, leave=False
+    )
     for _ in pbar:
         if len(fcs_set) >= n_cands_targ:
             break
@@ -623,14 +625,14 @@ def make_templates_from_candidates(
     n_tmpls: int,
     plf: pl.Fabric,
     log_prefix: Optional[str] = "mk_tmpl",
-) -> th.Tensor:
+) -> tuple[th.Tensor, th.Tensor]:
     # (n_data, n_cands)
     rwds: th.Tensor = tpcomp["rwds"]
     costs: th.Tensor = -rwds
     # template selected
     # **minimize cost**
     slctd_ms: th.Tensor = th.zeros((len(ctmpls)), dtype=th.bool)
-    pbar = tqdm.trange(n_tmpls, desc="make templates", leave=True, dynamic_ncols=True)
+    pbar = tqdm.trange(n_tmpls, desc="make templates", leave=False, dynamic_ncols=True)
     for _i in pbar:
         # start off with best template in the set
         if th.sum(slctd_ms) == 0:
@@ -645,7 +647,7 @@ def make_templates_from_candidates(
             pbar.set_postfix(metrics_d)
             if log_prefix is not None:
                 metrics_d = mylib.utils.add_prefix_to_dict(metrics_d, log_prefix)
-            plf.log_dict(metrics_d)
+            plf.log_dict(metrics_d, _i)
             continue
         # compute currently selected template set cost for each instance
         # (n_data, )
@@ -673,10 +675,10 @@ def make_templates_from_candidates(
         pbar.set_postfix(metrics_d)
         if log_prefix is not None:
             metrics_d = mylib.utils.add_prefix_to_dict(metrics_d, log_prefix)
-        plf.log_dict(metrics_d)
+        plf.log_dict(metrics_d, _i)
     pbar.close()
     tmpls: th.Tensor = ctmpls[slctd_ms]
-    return tmpls
+    return tmpls, slctd_ms
 
 
 # %%
@@ -726,7 +728,7 @@ def make_templates_vanilla(
     vdata: Optional[thd.TensorDict],
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
-) -> tuple[th.Tensor, th.Tensor]:
+) -> th.Tensor:
     n_covs: int = classifier.n_covs
     _i: int = 0
     max_features = n_covs if max_features is None else max_features
@@ -761,12 +763,12 @@ def make_templates_vanilla(
         )
         metrics_d.update(
             {
-                "minfeats": min_features_init,
+                "minfeats": min_features,
                 "maxfeats": max_features,
             }
         )
         plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_vanilla"), _i)
-    return ctmpls, slctd_ms
+    return tmpls
 
 
 def make_templates_reduce_features(
@@ -784,7 +786,7 @@ def make_templates_reduce_features(
     vdata: Optional[thd.TensorDict],
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
-) -> tuple[th.Tensor, th.Tensor]:
+) -> th.Tensor:
     n_covs: int = classifier.n_covs
     _i: int = 0
     max_features_targ = n_covs if max_features_targ is None else max_features_targ
@@ -873,7 +875,7 @@ def make_templates_reduce_features(
                 }
             )
             plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
-    return ctmpls, slctd_ms
+    return tmpls
 
 
 # %%
@@ -916,7 +918,7 @@ csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version
 plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="cpu")
 
 # %%
-ctmpls, slctd_ms = make_templates_vanilla(
+tmpls = make_templates_vanilla(
     tdata=tdata,
     classifier=classifier,
     init_fidx=init_fidx,
@@ -932,7 +934,7 @@ ctmpls, slctd_ms = make_templates_vanilla(
 )
 
 # %%
-ctmpls, slctd_ms = make_templates_reduce_features(
+tmpls = make_templates_reduce_features(
     tdata=tdata,
     classifier=classifier,
     init_fidx=init_fidx,
