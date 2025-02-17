@@ -587,14 +587,19 @@ def make_templates_reduce_features(
             }
         )
         plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
+    _minfeats_l: list[int] = [
+        _minfeats
+        for _minfeats in range(
+            min_features_init - feature_decrement,
+            min_features_targ - 1,
+            -feature_decrement,
+        )
+    ]
+    if min_features_targ not in _minfeats_l:
+        _minfeats_l.append(min_features_targ)
     # NOTE start decreasing features
-    for _minfeats in tqdm.trange(
-        min_features_init - feature_decrement,
-        min_features_targ - 1,
-        -feature_decrement,
-        desc="reduce features",
-        leave=False,
-        dynamic_ncols=True,
+    for _minfeats in tqdm.tqdm(
+        _minfeats_l, desc="reduce features", leave=False, dynamic_ncols=True
     ):
         _i = _i + 1
         _maxfeats: int = min(
@@ -658,8 +663,6 @@ def main(cfg: MainConf):
     )
     tdata: thd.TensorDict
     extdata: thd.TensorDict
-    print(_tdata)
-    print(_tdata_shuffle_idxs)
     tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
     extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
     # use only a subset of for speed
