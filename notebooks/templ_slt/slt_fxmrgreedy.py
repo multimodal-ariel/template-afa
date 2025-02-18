@@ -671,6 +671,109 @@ def _eval(
 
 
 # %%
+def make_feature_masks(
+    n_covs: int,
+    n_masks: int,
+    min_features: int,
+    max_features: Optional[int],
+) -> th.Tensor:
+    max_features = n_covs if max_features is None else max_features
+    bincnt_fcs_l: list[int] = [
+        # in order to accomondate for init_fidx,
+        # both n_covs and i is one less than desired n_feats
+        math.comb(n_covs, i)
+        for i in range(min_features, max_features + 1)
+    ]
+    n_masks = min(n_masks, sum(bincnt_fcs_l))
+    bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
+    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
+    nfc_from_each_binned_fcs: th.Tensor = th.bincount(
+        th.multinomial(ps, n_masks, replacement=True), minlength=len(bincnt_fcs)
+    )
+    # in case number of actions in any of the bin exceeds maximum number of actions
+    _curr_bincnts: th.Tensor = nfc_from_each_binned_fcs
+    while th.any(_curr_bincnts > bincnt_fcs):
+        _tmp_ps: th.Tensor = th.where(
+            _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
+        )
+        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
+        _realloc_cnts: th.Tensor = th.where(
+            _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
+        )
+        _tmp_bincnts: th.Tensor = th.bincount(
+            th.multinomial(
+                _tmp_ps,
+                int(th.sum(_realloc_cnts).item()),
+                replacement=True,
+            ),
+            minlength=len(bincnt_fcs),
+        )
+        _curr_bincnts = _curr_bincnts - _realloc_cnts + _tmp_bincnts
+    nfc_from_each_binned_fcs = _curr_bincnts
+    # make unique feature combination
+    fcs_sets_by_bins: list[set[tuple[int, ...]]] = [set() for _ in bincnt_fcs]
+    for _k, (_count, _fcs_set) in enumerate(
+        zip(nfc_from_each_binned_fcs, fcs_sets_by_bins)
+    ):
+        if _count == 0:
+            continue
+        _nfeats: int = _k + min_features
+        while len(_fcs_set) < _count:
+            _fc_l: list[int] = th.multinomial(
+                th.ones((n_covs,)), num_samples=_nfeats
+            ).tolist()
+            _fc_l.sort()
+            # ensure _ctmpl_fcs are all unique entries
+            _fc = tuple(_fc_l)
+            if _fc not in _fcs_set:
+                _fcs_set.add(_fc)
+    # from fcomb to act
+    fms: th.Tensor = th.zeros((n_masks, n_covs), dtype=th.long)
+    fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
+    assert len(fms) == len(fcs_l)
+    for _i, _fc in enumerate(fcs_l):
+        fms[_i, _fc] = 1
+    return fms
+
+
+def ident_init_fidx(
+    tdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    max_features: Optional[int],
+    n_iter: int,
+    lmbda: float,
+    bsz: int,
+) -> tuple[int, th.Tensor]:
+    n_covs: int = tdata["xs"].shape[1]
+    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        classifier.fit_(
+            make_feature_masks(
+                n_covs=n_covs,
+                n_masks=len(tdata),
+                min_features=1,
+                max_features=max_features,
+            )
+        )
+    fms: th.Tensor = make_feature_masks(
+        n_covs=n_covs, n_masks=n_iter, min_features=1, max_features=max_features
+    )
+    best_mask_cost: th.Tensor = th.inf * th.ones((n_covs,))
+    n_iter = min(n_iter, len(fms))
+    for _, _bfm in tqdm.tqdm(enumerate(fms), leave=False, dynamic_ncols=True):
+        _btidxs: th.Tensor = th.randint(0, len(tdata), (bsz,))
+        _btdata: thd.TensorDict = tdata[_btidxs]
+        _bfms: th.Tensor = _bfm[None, :].expand(bsz, -1)
+        _bpyhats: th.Tensor = classifier.predict_proba(_btdata["xs"], _bfms)
+        _bcosts: th.Tensor = th.nn.functional.cross_entropy(
+            _bpyhats, _btdata["ys"]
+        ) + lmbda * th.sum(_bfm)
+        best_mask_cost = th.minimum(
+            best_mask_cost, th.where(_bfm == 1, _bcosts, th.inf)
+        )
+    return int(th.argmin(best_mask_cost).item()), best_mask_cost
+
+
+# %%
 def make_templates_vanilla(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -846,12 +949,50 @@ def make_templates_reduce_features(
 
 
 # %%
-data_name: str = "cube_20_0.3"
-tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
-n_covs: int = tdata["xs"].shape[1]
-n_labels: int = len(th.unique(tdata["ys"]))
-classifier = SubsetFeatureNaiveBayes(
-    0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
+# NOTE cube
+# data_name: str = "cube_20_0.3"
+# tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+# n_covs: int = tdata["xs"].shape[1]
+# n_labels: int = len(th.unique(tdata["ys"]))
+# classifier = SubsetFeatureNaiveBayes(
+#     0.3, xs_train=tdata["xs"].numpy(), ys_train=tdata["ys"].numpy()
+# )
+# metrics_func = thm.MetricCollection(
+#     {
+#         "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+#         "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+#         "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+#         "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+#         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+#     }
+# )
+# init_fidx: int = 6
+# n_tmpls_targ: int = 64
+# n_cands_targ: int = 10_000
+# min_features_targ: int = 1
+# max_features_targ: Optional[int] = None
+# min_features_init: int = 10
+# feature_decrement: int = 2
+# lmbda: float = 0.3
+# bsz: int = 1024
+
+# %%
+# NOTE big5
+data_name: str = "big5_C_cls"
+_tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+n_covs: int = _tdata["xs"].shape[1]
+n_labels: int = len(th.unique(_tdata["ys"]))
+_tdata_shuffle_idxs = th.randperm(len(_tdata))
+tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
+tdata = tdata[:6000]
+extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
+classifier = SubsetFeatureConcatXGBClassifier(
+    xs_train=extdata["xs"].numpy(),
+    ys_train=extdata["ys"].numpy(),
+    xgb_kwargs={"n_estimators": 40},
+    fraction_training_data_per_split=1.0,
+    n_splits=64,
+    n_tmpl_per_instance=4,
 )
 metrics_func = thm.MetricCollection(
     {
@@ -862,16 +1003,14 @@ metrics_func = thm.MetricCollection(
         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
     }
 )
-
-# %%
-init_fidx: int = 6
-n_tmpls_targ: int = 64
+init_fidx: int = 31
+n_tmpls_targ: int = 128
 n_cands_targ: int = 10_000
+lmbda: float = 0.075
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
 min_features_init: int = 10
 feature_decrement: int = 2
-lmbda: float = 0.3
 bsz: int = 1024
 
 # %%
@@ -883,6 +1022,26 @@ csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version
 
 # %%
 plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="cpu")
+
+# %%
+_, _bestm1 = ident_init_fidx(
+    tdata=tdata,
+    classifier=classifier,
+    max_features=max_features_targ,
+    n_iter=500,
+    lmbda=lmbda,
+    bsz=bsz,
+)
+_, _bestm2 = ident_init_fidx(
+    tdata=tdata,
+    classifier=classifier,
+    max_features=max_features_targ,
+    n_iter=500,
+    lmbda=lmbda,
+    bsz=bsz,
+)
+_bestm: th.Tensor = th.mean(th.stack((_bestm1, _bestm2)), dim=0)
+init_fidx = int(th.argmin(_bestm).item())
 
 # %%
 tmpls = make_templates_vanilla(
