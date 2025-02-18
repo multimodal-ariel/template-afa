@@ -362,6 +362,7 @@ def _fill_fcs_set_with_random_tmpls(
     n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
+    prv_featcounts: Optional[th.Tensor],
 ) -> list[set[tuple[int, ...]]]:
     # fill the rest of the demanded with randomly generated ones
     # group fcs_set by len(fcomb)
@@ -426,7 +427,8 @@ def _fill_fcs_set_with_random_tmpls(
         _nfeats: int = _k + min_features
         while len(_fcs_set) - _init_fcs_set_len < _count:
             _fc_l: list[int] = th.multinomial(
-                th.ones((n_covs,)), num_samples=_nfeats
+                th.ones((n_covs,)) if prv_featcounts is None else prv_featcounts,
+                num_samples=_nfeats,
             ).tolist()
             # make sure initial feature is in fcomb
             if init_fidx not in _fc_l:
@@ -447,6 +449,7 @@ def update_template_candidates(
     n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
+    use_feature_importance_sampling: bool,
 ) -> th.Tensor:
     fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
         tmpls_prv=ctmpls[slctd_ms],
@@ -462,6 +465,11 @@ def update_template_candidates(
         n_cands_targ=n_cands_targ,
         min_features=min_features,
         max_features=max_features,
+        prv_featcounts=(
+            None
+            if not use_feature_importance_sampling
+            else th.sum(ctmpls[slctd_ms], dim=0)
+        ),
     )
     # from fcomb to act
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
@@ -945,6 +953,7 @@ def make_templates_reduce_features(
             n_cands_targ=n_cands_targ,
             min_features=_minfeats,
             max_features=_maxfeats,
+            use_feature_importance_sampling=True,
         )
         if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
             classifier.fit_(ctmpls)
