@@ -736,7 +736,7 @@ def make_feature_masks(
     return fms
 
 
-def ident_init_fidx(
+def _ident_init_fidx_single(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     max_features: Optional[int],
@@ -759,7 +759,10 @@ def ident_init_fidx(
     )
     best_mask_cost: th.Tensor = th.inf * th.ones((n_covs,))
     n_iter = min(n_iter, len(fms))
-    for _, _bfm in tqdm.tqdm(enumerate(fms), leave=False, dynamic_ncols=True):
+    for _i in tqdm.trange(
+        n_iter, desc="ident_init_fidx_single", leave=False, dynamic_ncols=True
+    ):
+        _bfm: th.Tensor = fms[_i]
         _btidxs: th.Tensor = th.randint(0, len(tdata), (bsz,))
         _btdata: thd.TensorDict = tdata[_btidxs]
         _bfms: th.Tensor = _bfm[None, :].expand(bsz, -1)
@@ -771,6 +774,34 @@ def ident_init_fidx(
             best_mask_cost, th.where(_bfm == 1, _bcosts, th.inf)
         )
     return int(th.argmin(best_mask_cost).item()), best_mask_cost
+
+
+def identify_init_fidx(
+    tdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    max_features: Optional[int],
+    n_repeat: int,
+    n_iter: int,
+    lmbda: float,
+    bsz: int,
+) -> tuple[int, th.Tensor]:
+    best_fms: th.Tensor = th.stack(
+        [
+            _ident_init_fidx_single(
+                tdata=tdata,
+                classifier=classifier,
+                max_features=max_features,
+                n_iter=n_iter,
+                lmbda=lmbda,
+                bsz=bsz,
+            )[1]
+            for _ in tqdm.trange(
+                n_repeat, desc="ident init_fidx", leave=False, dynamic_ncols=True
+            )
+        ]
+    )
+    best_fm: th.Tensor = th.mean(best_fms, dim=0)
+    return int(th.argmin(best_fm)), best_fm
 
 
 # %%
@@ -1024,24 +1055,15 @@ csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version
 plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="cpu")
 
 # %%
-_, _bestm1 = ident_init_fidx(
+init_fidx, bestfm = identify_init_fidx(
     tdata=tdata,
     classifier=classifier,
     max_features=max_features_targ,
+    n_repeat=2,
     n_iter=500,
     lmbda=lmbda,
     bsz=bsz,
 )
-_, _bestm2 = ident_init_fidx(
-    tdata=tdata,
-    classifier=classifier,
-    max_features=max_features_targ,
-    n_iter=500,
-    lmbda=lmbda,
-    bsz=bsz,
-)
-_bestm: th.Tensor = th.mean(th.stack((_bestm1, _bestm2)), dim=0)
-init_fidx = int(th.argmin(_bestm).item())
 
 # %%
 tmpls = make_templates_vanilla(
