@@ -971,7 +971,7 @@ data_name: str = "big5_C_cls"
 _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 n_covs: int = _tdata["xs"].shape[1]
 n_labels: int = len(th.unique(_tdata["ys"]))
-max_tdata: Optional[int] = 6000
+max_tdata: Optional[int] = 8192
 _tdata_shuffle_idxs = th.randperm(len(_tdata))
 tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
 extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
@@ -1000,7 +1000,7 @@ min_features_targ: int = 1
 max_features_targ: Optional[int] = None
 min_features_init: int = 10
 feature_decrement: int = 2
-bsz: int = 1024
+bsz: int = 8192
 
 # %%
 # configure logger and ckpt path
@@ -1023,6 +1023,23 @@ if init_fidx is None:
         lmbda=lmbda,
         bsz=bsz,
     )
+
+# %%
+tmpls = make_templates_vanilla(
+    tdata=tdata,
+    max_tdata=max_tdata,
+    classifier=tclassifier,
+    init_fidx=init_fidx,
+    n_tmpls=n_tmpls_targ,
+    n_cands=n_cands_targ,
+    min_features=1,
+    max_features=10,
+    lmbda=lmbda,
+    bsz=bsz,
+    vdata=vdata,
+    metrics_func=metrics_func,
+    plf=plf,
+)
 
 # %%
 tmpls = make_templates_reduce_features(
@@ -1067,7 +1084,7 @@ for _data in vdata:
             tinps=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=5,
+            n_neighs=2,
             p=2,
         ),
         init_fidx=init_fidx,
@@ -1083,6 +1100,7 @@ metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().it
 metrics_func.reset()
 metrics_d.update(
     {
+        "init_fidx": init_fidx,
         "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
         "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
     }
