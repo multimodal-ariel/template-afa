@@ -817,6 +817,7 @@ def identify_init_fidx(
 # %%
 def make_templates_vanilla(
     tdata: thd.TensorDict,
+    max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     init_fidx: int,
     n_tmpls: int,
@@ -843,7 +844,15 @@ def make_templates_vanilla(
     if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
         classifier.fit_(ctmpls)
     tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
-        tmpls=ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+        tmpls=ctmpls,
+        data=(
+            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        ),
+        classifier=classifier,
+        lmbda=lmbda,
+        bsz=bsz,
     )
     tmpls, slctd_ms = make_templates_from_candidates(
         tpcomp=tpcomp,
@@ -875,6 +884,7 @@ def make_templates_vanilla(
 
 def make_templates_reduce_features(
     tdata: thd.TensorDict,
+    max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     init_fidx: int,
     n_tmpls_targ: int,
@@ -903,7 +913,15 @@ def make_templates_reduce_features(
     if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
         classifier.fit_(ctmpls)
     tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
-        tmpls=ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+        tmpls=ctmpls,
+        data=(
+            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        ),
+        classifier=classifier,
+        lmbda=lmbda,
+        bsz=bsz,
     )
     tmpls, slctd_ms = make_templates_from_candidates(
         tpcomp=tpcomp,
@@ -960,7 +978,15 @@ def make_templates_reduce_features(
         if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
             classifier.fit_(ctmpls)
         tpcomp = precomp_rwds_for_tmpls(
-            ctmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz
+            ctmpls,
+            data=(
+                tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+                if max_tdata is not None and max_tdata < len(tdata)
+                else tdata
+            ),
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
         )
         tmpls, slctd_ms = make_templates_from_candidates(
             tpcomp=tpcomp,
@@ -993,6 +1019,7 @@ def make_templates_reduce_features(
 # %%
 # NOTE cube
 # data_name: str = "cube_20_0.3"
+# max_tdata: Optional[int] = None
 # tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 # n_covs: int = tdata["xs"].shape[1]
 # n_labels: int = len(th.unique(tdata["ys"]))
@@ -1024,9 +1051,9 @@ data_name: str = "big5_C_cls"
 _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 n_covs: int = _tdata["xs"].shape[1]
 n_labels: int = len(th.unique(_tdata["ys"]))
+max_tdata: Optional[int] = 6000
 _tdata_shuffle_idxs = th.randperm(len(_tdata))
 tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
-tdata = tdata[:6000]
 extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
 classifier = SubsetFeatureConcatXGBClassifier(
     xs_train=extdata["xs"].numpy(),
@@ -1079,6 +1106,7 @@ init_fidx, bestfm = identify_init_fidx(
 # %%
 tmpls = make_templates_vanilla(
     tdata=tdata,
+    max_tdata=max_tdata,
     classifier=classifier,
     init_fidx=init_fidx,
     n_tmpls=n_tmpls_targ,
@@ -1095,6 +1123,7 @@ tmpls = make_templates_vanilla(
 # %%
 tmpls = make_templates_reduce_features(
     tdata=tdata,
+    max_tdata=max_tdata,
     classifier=classifier,
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
