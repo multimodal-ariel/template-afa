@@ -832,10 +832,12 @@ def _knn(
         th.Tensor: (n, n_neighs) distance to nearest neighbors neighbors
         th.Tensor: (n, n_neighs) indices to nearest neighbors in training data
     """
+    # (n, n_tdata)
     ds: th.Tensor = th.cdist(xs[None, :, :], txs[None, :, :], p=p)[0]
+    # (n, n_tdata)
     ds, knnidxs = th.sort(ds, dim=1, descending=False)
-    ds = ds[:n_neighs]
-    knnidxs = knnidxs[:n_neighs]
+    ds = ds[:, :n_neighs]
+    knnidxs = knnidxs[:, :n_neighs]
     return ds, knnidxs
 
 
@@ -871,19 +873,21 @@ def knn_cost_est(
     for _inp in inps:
         # (n_covs, )
         _inp: th.Tensor
-        _fm: th.Tensor = th.argwhere(_inp[n_covs:] == 1)
+        _fm: th.Tensor = _inp[n_covs:]
+        _fc: tuple[int, ...] = tuple(th.argwhere(_fm == 1).flatten().tolist())
         # (n_tmpls, n_covs)
         _fm_avail: th.Tensor = th.maximum(tmpls - _fm[None, :], th.as_tensor(0.0))
         # (n_neighs, )
         _knnidxs: th.Tensor = _knn(
-            xs=_inp[None, :].to(device=device),
-            txs=tinps[None, _fm].to(device=device),
+            xs=_inp[None, _fc].to(device=device),
+            txs=tinps[:, _fc].to(device=device),
             n_neighs=n_neighs,
             p=p,
         )[1][0].to(device="cpu")
         # (n_neighs, n_tmpls)
         _cels: th.Tensor = tcels[_knnidxs]
         _costs: th.Tensor = _cels + lmbda * th.sum(_fm_avail[None, :, :], dim=2)
+        _costs = th.mean(_costs, dim=0)
         costs_l.append(_costs)
     costs: th.Tensor = th.stack(costs_l, dim=0).to(device=device)
     return costs
@@ -1063,7 +1067,7 @@ for _data in vdata:
             tinps=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=20,
+            n_neighs=5,
             p=2,
         ),
         init_fidx=init_fidx,
