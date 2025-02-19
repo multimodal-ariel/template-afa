@@ -398,14 +398,12 @@ def _fill_fcs_set_with_random_tmpls(
         _init_fcs_set_len: int = len(_fcs_set)
         _nfeats: int = _k + min_features
         while len(_fcs_set) - _init_fcs_set_len < _count:
-            _fc_l: list[int] = th.multinomial(
-                (
-                    th.ones((n_covs,))
-                    if prv_featcounts is None
-                    else prv_featcounts.to(dtype=th.float32)
-                ),
-                num_samples=_nfeats,
-            ).tolist()
+            _ps: th.Tensor = (
+                th.ones((n_covs,)) if prv_featcounts is None else prv_featcounts
+            )
+            _ps = th.where(_ps == 0, th.min(_ps[_ps > 0]), _ps)
+            _ps = _ps.to(dtype=th.float32)
+            _fc_l: list[int] = th.multinomial(_ps, num_samples=_nfeats).tolist()
             # make sure initial feature is in fcomb
             if init_fidx not in _fc_l:
                 _fc_l.append(init_fidx)
