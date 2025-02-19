@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools as itrtls
 import math
 import os
-from typing import Optional
+from typing import Callable, Optional
 
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
@@ -13,6 +13,7 @@ import mylib.utils
 import mymodels.classifiers
 import mymodels.nn
 import mymodels.protocols
+import pandas as pd
 import tensordict as thd
 import torch as th
 import torch.distributions.utils
@@ -72,6 +73,10 @@ def eval_with_oracle_from_precomp(
 
 
 # %%
+def feature_masks_to_feature_combs(tmpls: th.Tensor):
+    return [tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls]
+
+
 # NOTE identify initial feature
 def make_feature_masks(
     n_covs: int,
@@ -813,6 +818,123 @@ def _eval_oracle(
 
 
 # %%
+@th.no_grad()
+def _knn(
+    xs: th.Tensor, txs: th.Tensor, n_neighs: int, p: float = 2
+) -> tuple[th.Tensor, th.Tensor]:
+    """knn
+
+    Args:
+        xs (th.Tensor): (n, n_covs) inputs
+        txs (th.Tensor): (n_tdata, n_covs) training input covariates
+        n_neighs (int): number of neighbors
+        p (float, optional): p-norm distance. Defaults to 2.
+
+    Returns::
+        th.Tensor: (n, n_neighs) distance to nearest neighbors neighbors
+        th.Tensor: (n, n_neighs) indices to nearest neighbors in training data
+    """
+    ds: th.Tensor = th.cdist(xs[None, :, :], txs[None, :, :], p=p)[0]
+    ds, knnidxs = th.sort(ds, dim=1, descending=False)
+    ds = ds[:n_neighs]
+    knnidxs = knnidxs[:n_neighs]
+    return ds, knnidxs
+
+
+def knn_cost_est(
+    inps: th.Tensor,
+    lmbda: float,
+    tinps: th.Tensor,
+    tcels: th.Tensor,
+    tmpls: th.Tensor,
+    n_neighs: int,
+    p: float = 2,
+) -> th.Tensor:
+    """use knn strategy to compute cost
+
+    Args:
+        inps (th.Tensor): (n, n_covs * 2)
+        lmbda (float): feature penalty
+        tinps (th.Tensor): (n, n_covs)
+        tcels (th.Tensor): (n, n_tmpls)
+        tmpls (th.Tensor): (n_tmpls, n_covs)
+        n_neighs (int): number of neighbors
+        p (float, optional): p-norm distance. Defaults to 2.
+
+    Returns::
+        th.Tensor: (n, n_tmpls) costs of using each template
+    """
+    # th.Tensor: (n, n_tmpls) costs of using each template
+    n_covs: int = tinps.shape[1]
+    device: th.device = inps.device
+    tinps = tinps.to(device=device)
+    tcels = tcels.to(device=device)
+    costs_l: list[th.Tensor] = list()
+    for _inp in inps:
+        # (n_covs, )
+        _inp: th.Tensor
+        _fm: th.Tensor = th.argwhere(_inp[n_covs:] == 1)
+        # (n_tmpls, n_covs)
+        _fm_avail: th.Tensor = th.maximum(tmpls - _fm[None, :], th.as_tensor(0.0))
+        # (n_neighs, )
+        _knnidxs: th.Tensor = _knn(
+            xs=_inp[None, :].to(device=device),
+            txs=tinps[None, _fm].to(device=device),
+            n_neighs=n_neighs,
+            p=p,
+        )[1][0].to(device="cpu")
+        # (n_neighs, n_tmpls)
+        _cels: th.Tensor = tcels[_knnidxs]
+        _costs: th.Tensor = _cels + lmbda * th.sum(_fm_avail[None, :, :], dim=2)
+        costs_l.append(_costs)
+    costs: th.Tensor = th.stack(costs_l, dim=0).to(device=device)
+    return costs
+
+
+def run_one_episode(
+    x: th.Tensor,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    cost_est: Callable[[th.Tensor], th.Tensor],
+    init_fidx: int,
+    allfcombs_l: list[tuple[int, ...]],
+    plf: pl.Fabric,
+) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+    if isinstance(cost_est, th.nn.Module):
+        cost_est.eval().to(device=plf.device)
+    fobsd_l: list[int] = [init_fidx]
+    fcomb: tuple[int, ...] | None = None
+    for _ in itrtls.count():
+        # make feature bit mask
+        _m: th.Tensor = th.zeros_like(x)
+        _m[fobsd_l] = 1
+        # forward prop. cost est.
+        # (1, 2 * n_covs)
+        _inps: th.Tensor = th.cat((x, _m))[None, :]
+        # (1, n_tmpls)
+        _costs: th.Tensor = cost_est(_inps.to(device=plf.device)).to(device="cpu")
+        _fcomb_idx: int = int(th.argmin(_costs[0]).item())
+        _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
+        # ident. unacquired features
+        _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
+        if len(_tmp_fcomb) == 0:
+            fcomb = _tmpl_fcomb
+            break
+        # randomly choose a feature to acquire
+        _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
+        # add acquired feature to fcomb
+        fobsd_l.append(_tmp_fcomb[_tmp_fcomb_idx])
+        # terminate acq. if all features in template has been satisfied
+        if all([fidx in fobsd_l for fidx in _tmpl_fcomb]):
+            fcomb = _tmpl_fcomb
+            break
+    assert fcomb is not None
+    acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
+    acts[0, fcomb] = 1
+    pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
+    return pyhats[0], fobsd_l, fcomb
+
+
+# %%
 # NOTE cube
 # data_name: str = "cube_20_0.3"
 # max_tdata: Optional[int] = None
@@ -851,7 +973,7 @@ max_tdata: Optional[int] = 6000
 _tdata_shuffle_idxs = th.randperm(len(_tdata))
 tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
 extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
-classifier = SubsetFeatureConcatXGBClassifier(
+tclassifier = SubsetFeatureConcatXGBClassifier(
     xs_train=extdata["xs"].numpy(),
     ys_train=extdata["ys"].numpy(),
     xgb_kwargs={"n_estimators": 40},
@@ -889,38 +1011,22 @@ csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version
 plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="cpu")
 
 # %%
-init_fidx, bestfm = identify_init_fidx(
-    tdata=tdata,
-    classifier=classifier,
-    max_features=max_features_targ,
-    n_repeat=2,
-    n_iter=500,
-    lmbda=lmbda,
-    bsz=bsz,
-)
-
-# %%
-tmpls = make_templates_vanilla(
-    tdata=tdata,
-    max_tdata=max_tdata,
-    classifier=classifier,
-    init_fidx=init_fidx,
-    n_tmpls=n_tmpls_targ,
-    n_cands=n_cands_targ,
-    min_features=min_features_targ,
-    max_features=max_features_targ,
-    lmbda=lmbda,
-    bsz=bsz,
-    vdata=vdata,
-    metrics_func=metrics_func,
-    plf=plf,
-)
+if init_fidx is None:
+    init_fidx, bestfm = identify_init_fidx(
+        tdata=tdata,
+        classifier=tclassifier,
+        max_features=max_features_targ,
+        n_repeat=2,
+        n_iter=500,
+        lmbda=lmbda,
+        bsz=bsz,
+    )
 
 # %%
 tmpls = make_templates_reduce_features(
     tdata=tdata,
     max_tdata=max_tdata,
-    classifier=classifier,
+    classifier=tclassifier,
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
     n_cands_targ=n_cands_targ,
@@ -934,5 +1040,52 @@ tmpls = make_templates_reduce_features(
     metrics_func=metrics_func,
     plf=plf,
 )
+
+# %%
+tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz
+)
+
+# %%
+vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
+    xs_train=extdata["xs"].numpy(),
+    ys_train=extdata["ys"].numpy(),
+    xgbc_kwargs={"n_estimators": 40},
+)
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = run_one_episode(
+        x=_data["xs"],
+        classifier=vclassifier,
+        cost_est=lambda x: knn_cost_est(
+            x,
+            lmbda=lmbda,
+            tinps=tdata["xs"],
+            tcels=tpcomp["cels"],
+            tmpls=tmpls,
+            n_neighs=20,
+            p=2,
+        ),
+        init_fidx=init_fidx,
+        allfcombs_l=feature_masks_to_feature_combs(tmpls),
+        plf=plf,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
+    }
+)
+print(pd.Series(metrics_d))
+
 
 # %%
