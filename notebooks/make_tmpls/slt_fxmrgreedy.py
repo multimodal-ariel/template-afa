@@ -900,84 +900,47 @@ def make_templates_reduce_features(
     plf: pl.Fabric,
 ) -> th.Tensor:
     n_covs: int = classifier.n_covs
-    _i: int = 0
     max_features_targ = n_covs if max_features_targ is None else max_features_targ
-    # NOTE init. candidate templates
-    ctmpls: th.Tensor = make_template_candidates(
-        n_covs=n_covs,
-        init_fidx=init_fidx,
-        n_cands_targ=n_cands_targ,
-        min_features=min_features_init,
-        max_features=max_features_targ,
-    )
-    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
-        classifier.fit_(ctmpls)
-    tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
-        tmpls=ctmpls,
-        data=(
-            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
-            if max_tdata is not None and max_tdata < len(tdata)
-            else tdata
-        ),
-        classifier=classifier,
-        lmbda=lmbda,
-        bsz=bsz,
-    )
-    tmpls, slctd_ms = make_templates_from_candidates(
-        tpcomp=tpcomp,
-        ctmpls=ctmpls,
-        n_tmpls=n_tmpls_targ,
-        plf=plf,
-        log_prefix=f"reduce_mktmpl{_i}",
-    )
-    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
-        classifier.fit_(tmpls)
-    if vdata is not None:
-        metrics_d: dict[str, float] = _eval(
-            data=vdata,
-            classifier=classifier,
-            tmpls=tmpls,
-            lmbda=lmbda,
-            bsz=bsz,
-            metrics_func=metrics_func,
-        )
-        metrics_d.update(
-            {
-                "minfeats": min_features_init,
-                "maxfeats": max_features_targ,
-            }
-        )
-        plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
+    ctmpls: th.Tensor | None = None
+    tmpls: th.Tensor | None = None
+    slctd_ms: th.Tensor | None = None
     _minfeats_l: list[int] = [
         _minfeats
         for _minfeats in range(
-            min_features_init - feature_decrement,
-            min_features_targ - 1,
-            -feature_decrement,
+            min_features_init, min_features_targ - 1, -feature_decrement
         )
     ]
     if min_features_targ not in _minfeats_l:
         _minfeats_l.append(min_features_targ)
-    # NOTE start decreasing features
+    _maxfeats: int = max_features_targ
+    _i: int = 0
     for _minfeats in tqdm.tqdm(
         _minfeats_l, desc="reduce features", leave=False, dynamic_ncols=True
     ):
-        _i = _i + 1
-        _maxfeats: int = min(
-            max_features_targ, int(th.max(th.sum(tmpls, dim=1)).item())
-        )
-        ctmpls = update_template_candidates(
-            ctmpls=ctmpls,
-            slctd_ms=slctd_ms,
-            init_fidx=init_fidx,
-            n_cands_targ=n_cands_targ,
-            min_features=_minfeats,
-            max_features=_maxfeats,
-            use_feature_importance_sampling=True,
-        )
+        if ctmpls is None or tmpls is None or slctd_ms is None:
+            # initialize candidate pool
+            ctmpls = make_template_candidates(
+                n_covs=n_covs,
+                init_fidx=init_fidx,
+                n_cands_targ=n_cands_targ,
+                min_features=_minfeats,
+                max_features=_maxfeats,
+            )
+        else:
+            # update candidate pool from existing templates
+            _maxfeats = min(max_features_targ, int(th.max(th.sum(tmpls, dim=1)).item()))
+            ctmpls = update_template_candidates(
+                ctmpls=ctmpls,
+                slctd_ms=slctd_ms,
+                init_fidx=init_fidx,
+                n_cands_targ=n_cands_targ,
+                min_features=_minfeats,
+                max_features=_maxfeats,
+                use_feature_importance_sampling=True,
+            )
         if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
             classifier.fit_(ctmpls)
-        tpcomp = precomp_rwds_for_tmpls(
+        tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
             ctmpls,
             data=(
                 tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
@@ -1013,6 +976,8 @@ def make_templates_reduce_features(
                 }
             )
             plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
+        _i = _i + 1
+    assert tmpls is not None
     return tmpls
 
 
