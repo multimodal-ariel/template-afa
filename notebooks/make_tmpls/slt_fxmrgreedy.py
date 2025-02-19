@@ -427,7 +427,11 @@ def _fill_fcs_set_with_random_tmpls(
         _nfeats: int = _k + min_features
         while len(_fcs_set) - _init_fcs_set_len < _count:
             _fc_l: list[int] = th.multinomial(
-                th.ones((n_covs,)) if prv_featcounts is None else prv_featcounts,
+                (
+                    th.ones((n_covs,))
+                    if prv_featcounts is None
+                    else prv_featcounts.to(dtype=th.float32)
+                ),
                 num_samples=_nfeats,
             ).tolist()
             # make sure initial feature is in fcomb
@@ -466,9 +470,7 @@ def update_template_candidates(
         min_features=min_features,
         max_features=max_features,
         prv_featcounts=(
-            None
-            if not use_feature_importance_sampling
-            else th.sum(ctmpls[slctd_ms], dim=0)
+            th.sum(ctmpls[slctd_ms], dim=0) if use_feature_importance_sampling else None
         ),
     )
     # from fcomb to act
