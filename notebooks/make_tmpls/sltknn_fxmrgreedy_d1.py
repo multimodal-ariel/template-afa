@@ -229,17 +229,14 @@ def make_template_candidates(
     ]
     n_cands: int = min(n_cands_targ, sum(bincnt_fcs_l))
     bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
-    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
+    ps: th.Tensor = th.ones_like(bincnt_fcs, dtype=th.float32)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_cands, replacement=True), minlength=len(bincnt_fcs)
     )
     # in case number of actions in any of the bin exceeds maximum number of actions
     _curr_bincnts: th.Tensor = nfc_from_each_binned_fcs
     while th.any(_curr_bincnts > bincnt_fcs):
-        _tmp_ps: th.Tensor = th.where(
-            _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
-        )
-        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
+        _tmp_ps: th.Tensor = th.where(_curr_bincnts >= bincnt_fcs, 0, 1.0)
         _realloc_cnts: th.Tensor = th.where(
             _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
         )
@@ -361,7 +358,7 @@ def _fill_fcs_set_with_random_tmpls(
         list(map(len, fcs_sets_by_bins)), dtype=th.long
     )
     # sample number of fcs to add to existing feature combinations
-    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
+    ps: th.Tensor = th.ones_like(bincnt_fcs, dtype=th.float32)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_cands_targ - len(fcs_set), replacement=True),
         minlength=len(bincnt_fcs),
@@ -369,10 +366,7 @@ def _fill_fcs_set_with_random_tmpls(
     # in case number of actions in any of the bin exceeds maximum number of actions
     _curr_bincnts: th.Tensor = nfc_from_each_binned_fcs
     while th.any(_curr_bincnts > bincnt_fcs):
-        _tmp_ps: th.Tensor = th.where(
-            _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
-        )
-        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
+        _tmp_ps: th.Tensor = th.where(_curr_bincnts >= bincnt_fcs, 0, 1.0)
         _realloc_cnts: th.Tensor = th.where(
             _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
         )
