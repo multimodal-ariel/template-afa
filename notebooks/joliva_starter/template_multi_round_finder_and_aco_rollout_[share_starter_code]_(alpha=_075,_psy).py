@@ -52,10 +52,6 @@ with open(data_p, "rb") as file:
 
 
 # %%
-file = open("/content/drive/My Drive/Data/psy/big5_C_cls.pkl", "rb")
-unpickled_data = pickle.load(file)
-file.close()
-
 Xtrn, Ytrn = unpickled_data["train"]
 # muX = np.mean(Xtrn, 0, keepdims=True)
 # stdX = np.std(Xtrn, 0, keepdims=True)
@@ -613,8 +609,12 @@ def tf_arbitrary_knn(Xtrn, Ytrn, Xtst, indices, k=1, Xtrnl2=None, toss_first=Fal
       toss_first: flag to throwout the first neighbor
                   (if querying within training set)
     """
-    Xtrnfeats = np.take_along_axis(Xtrn, indices, axis=1)
-    Xtstfeats = np.take_along_axis(Xtst, indices, axis=1)
+    import torch as th
+
+    # Xtrnfeats = np.take_along_axis(Xtrn, indices, axis=1)
+    # Xtstfeats = np.take_along_axis(Xtst, indices, axis=1)
+    Xtrnfeats = Xtrn[:, indices]
+    Xtstfeats = Xtst[:, indices]
     if Xtrnl2 is None:
         Xtrnl2 = np.sum(Xtrnfeats**2, axis=1, keepdims=True)
     d2 = (
@@ -623,16 +623,18 @@ def tf_arbitrary_knn(Xtrn, Ytrn, Xtst, indices, k=1, Xtrnl2=None, toss_first=Fal
         + np.transpose(np.sum(Xtstfeats**2, axis=1, keepdims=True))
     )
     d2_sorti = np.argsort(d2, axis=0)
+    ntmpl: int = Ytrn.shape[1]
+    n: int = d2_sorti.shape[1]
+    d2_sorti = th.as_tensor(d2_sorti)[:, None, :].expand(-1, ntmpl, -1).numpy()
+    ys = th.as_tensor(Ytrn)[:, :, None].expand(-1, -1, n).numpy()
     Y_neighbors = np.mean(
         np.take_along_axis(
-            Ytrn,
-            np.transpose(
-                d2_sorti[(1 if toss_first else 0) : (k + 1 if toss_first else k), :]
-            ),
+            ys,
+            d2_sorti[(1 if toss_first else 0) : (k + 1 if toss_first else k), :, :],
             axis=0,
         ),
-        axis=1,
-    )
+        axis=0,
+    ).T
     return Y_neighbors
 
 
