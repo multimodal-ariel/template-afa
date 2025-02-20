@@ -1157,7 +1157,7 @@ metrics_func = thm.MetricCollection(
         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
     }
 )
-init_fidx: int = 31
+init_fidx: int = 35
 n_tmpls_targ: int = 128
 n_cands_targ: int = 10_000
 lmbda: float = 0.075
@@ -1171,7 +1171,9 @@ bsz: int = 8192
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "sltknn_fxmrgreedy")
+output_dir: str = os.path.join(
+    "outputs", "run", data_name, "sltknn_fxmrgreedy_fixrounds"
+)
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -1200,7 +1202,7 @@ tmpls = make_templates_vanilla(
     n_tmpls=n_tmpls_targ,
     n_cands=n_cands_targ,
     min_features=1,
-    max_features=10,
+    max_features=max_features_targ,
     lmbda=lmbda,
     bsz=bsz,
     vdata=vdata,
