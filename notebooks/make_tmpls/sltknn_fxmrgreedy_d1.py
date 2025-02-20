@@ -304,13 +304,10 @@ def _mutate_tmpls(
             break
         # randomly choose an existing template to mutate from
         _tmpl_prv: th.Tensor = tmpls_prv[int(th.randint(0, len(tmpls_prv), ()).item())]
-        _nfeats_prv: int = int(th.sum(_tmpl_prv).item())
-        # compute number of features that can be mutated
-        _nfeats_mutavail = _nfeats_prv - min_features
         # make copy of selected template
         _tmpl: th.Tensor = _tmpl_prv.clone()
-        # number of features to mutate
-        _nfeats_mut: int = int(th.randint(1, _nfeats_mutavail + 1, ()).item())
+        # always remove one feature from currently chosen templates
+        _nfeats_mut: int = 1
         # indices to previously selected feature
         _fidxs: th.Tensor = th.argwhere(_tmpl == 1).flatten()
         # prevent init_fidx from being mutated
@@ -446,6 +443,42 @@ def update_template_candidates(
     # from fcomb to act
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
     n_cands: int = min(n_cands_targ, len(fcs_l))
+    ctmpls_new: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
+    for _i, _fc in enumerate(fcs_l):
+        ctmpls_new[_i, _fc] = 1
+    return ctmpls_new
+
+
+def update_template_candidates_fix_rounds(
+    ctmpls: th.Tensor,
+    slctd_ms: th.Tensor,
+    init_fidx: int,
+    min_features: int,
+    max_features: Optional[int],
+    use_feature_importance_sampling: bool,
+) -> th.Tensor:
+    tmpls_prv: th.Tensor = ctmpls[slctd_ms]
+    fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
+        tmpls_prv=tmpls_prv,
+        init_fidx=init_fidx,
+        n_cands_targ=2 * len(tmpls_prv),
+        min_features=min_features,
+    )
+    n_covs: int = ctmpls.shape[1]
+    fcs_sets_by_bins: list[set[tuple[int, ...]]] = _fill_fcs_set_with_random_tmpls(
+        fcs_set=fcs_set,
+        n_covs=n_covs,
+        init_fidx=init_fidx,
+        n_cands_targ=3 * len(tmpls_prv),
+        min_features=min_features,
+        max_features=max_features,
+        prv_featcounts=(
+            th.sum(ctmpls[slctd_ms], dim=0) if use_feature_importance_sampling else None
+        ),
+    )
+    # from fcomb to act
+    fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
+    n_cands: int = len(fcs_l)
     ctmpls_new: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
     for _i, _fc in enumerate(fcs_l):
         ctmpls_new[_i, _fc] = 1
@@ -695,6 +728,7 @@ def make_templates_reduce_features(
     max_features_targ: Optional[int],
     min_features_init: int,
     feature_decrement: int,
+    use_feature_importance_sampling: bool,
     lmbda: float,
     bsz: int,
     vdata: Optional[thd.TensorDict],
@@ -738,7 +772,7 @@ def make_templates_reduce_features(
                 n_cands_targ=n_cands_targ,
                 min_features=_minfeats,
                 max_features=_maxfeats,
-                use_feature_importance_sampling=True,
+                use_feature_importance_sampling=use_feature_importance_sampling,
             )
         if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
             classifier.fit_(ctmpls)
@@ -779,6 +813,94 @@ def make_templates_reduce_features(
             )
             plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "train_reduce"), _i)
         _i = _i + 1
+    assert tmpls is not None
+    return tmpls
+
+
+def make_templates_fix_rounds(
+    tdata: thd.TensorDict,
+    max_tdata: Optional[int],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    n_tmpls_targ: int,
+    n_cands_init: int,
+    min_features: int,
+    max_features: Optional[int],
+    n_rounds: int,
+    use_feature_importance_sampling: bool,
+    lmbda: float,
+    bsz: int,
+    vdata: Optional[thd.TensorDict],
+    metrics_func: thm.MetricCollection,
+    plf: pl.Fabric,
+) -> th.Tensor:
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    ctmpls: th.Tensor | None = None
+    tmpls: th.Tensor | None = None
+    slctd_ms: th.Tensor | None = None
+    for _i in tqdm.trange(
+        n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
+    ):
+        if ctmpls is None or tmpls is None or slctd_ms is None:
+            # initialize candidate pool
+            ctmpls = make_template_candidates(
+                n_covs=n_covs,
+                init_fidx=init_fidx,
+                n_cands_targ=n_cands_init,
+                min_features=min_features,
+                max_features=max_features,
+            )
+        else:
+            # update candidate pool from existing templates
+            ctmpls = update_template_candidates_fix_rounds(
+                ctmpls=ctmpls,
+                slctd_ms=slctd_ms,
+                init_fidx=init_fidx,
+                min_features=min_features,
+                max_features=max_features,
+                use_feature_importance_sampling=use_feature_importance_sampling,
+            )
+        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+            classifier.fit_(ctmpls)
+        tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+            ctmpls,
+            data=(
+                tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+                if max_tdata is not None and max_tdata < len(tdata)
+                else tdata
+            ),
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+        )
+        tmpls, slctd_ms = make_templates_from_candidates(
+            tpcomp=tpcomp,
+            ctmpls=ctmpls,
+            n_tmpls=n_tmpls_targ,
+            plf=plf,
+            log_prefix=f"fixrounds_mktmpl{_i}",
+        )
+        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+            classifier.fit_(tmpls)
+        if vdata is not None:
+            metrics_d: dict[str, float] = _eval_oracle(
+                data=vdata,
+                classifier=classifier,
+                tmpls=tmpls,
+                lmbda=lmbda,
+                bsz=bsz,
+                metrics_func=metrics_func,
+            )
+            metrics_d.update(
+                {
+                    "minfeats": min_features,
+                    "maxfeats": max_features,
+                }
+            )
+            plf.log_dict(
+                mylib.utils.add_prefix_to_dict(metrics_d, "train_fixrounds"), _i
+            )
     assert tmpls is not None
     return tmpls
 
@@ -1042,7 +1164,9 @@ lmbda: float = 0.075
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
 min_features_init: int = 10
+n_rounds: int = 3
 feature_decrement: int = 2
+use_feature_importance_sampling: bool = True
 bsz: int = 8192
 
 # %%
@@ -1096,6 +1220,26 @@ tmpls = make_templates_reduce_features(
     max_features_targ=max_features_targ,
     min_features_init=min_features_init,
     feature_decrement=feature_decrement,
+    use_feature_importance_sampling=use_feature_importance_sampling,
+    lmbda=lmbda,
+    bsz=bsz,
+    vdata=vdata,
+    metrics_func=metrics_func,
+    plf=plf,
+)
+
+# %%
+tmpls = make_templates_fix_rounds(
+    tdata=tdata,
+    max_tdata=max_tdata,
+    classifier=tclassifier,
+    init_fidx=init_fidx,
+    n_tmpls_targ=n_tmpls_targ,
+    n_cands_init=n_cands_targ,
+    min_features=min_features_targ,
+    max_features=max_features_targ,
+    n_rounds=n_rounds,
+    use_feature_importance_sampling=use_feature_importance_sampling,
     lmbda=lmbda,
     bsz=bsz,
     vdata=vdata,
@@ -1151,7 +1295,7 @@ metrics_d.update(
 print(pd.Series(metrics_d))
 
 
-#%%
+# %%
 vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
     xs_train=extdata["xs"].numpy(),
     ys_train=extdata["ys"].numpy(),
@@ -1187,7 +1331,9 @@ metrics_func.reset()
 metrics_d.update(
     {
         "init_fidx": init_fidx,
-        "feature used & observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
+        "feature used & observed": th.mean(
+            th.as_tensor(snfobsd_l, dtype=th.float32)
+        ).item(),
     }
 )
 print(pd.Series(metrics_d))
