@@ -1089,9 +1089,10 @@ def run_one_episode_all_obsd(
             fcomb = _tmpl_fcomb
             break
     assert fcomb is not None
+    fcomb = tuple(sorted(fobsd_l))
     acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
     acts[0, fobsd_l] = 1
-    pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
+    pyhats: th.Tensor = classifier.predict_proba(x[None, :] * acts, acts)
     return pyhats[0], fobsd_l, fcomb
 
 
@@ -1304,6 +1305,49 @@ for _data in vdata:
     _pyhat, _fobsd_l, _fcomb = run_one_episode_all_obsd(
         x=_data["xs"],
         classifier=vclassifier,
+        cost_est=lambda x: knn_cost_est(
+            x,
+            lmbda=lmbda,
+            tinps=tdata["xs"],
+            tcels=tpcomp["cels"],
+            tmpls=tmpls,
+            n_neighs=2,
+            p=2,
+        ),
+        init_fidx=init_fidx,
+        allfcombs_l=feature_masks_to_feature_combs(tmpls),
+        plf=plf,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "init_fidx": init_fidx,
+        "feature used & observed": th.mean(
+            th.as_tensor(snfobsd_l, dtype=th.float32)
+        ).item(),
+    }
+)
+print(pd.Series(metrics_d))
+
+# %%
+vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
+    xs_train=extdata["xs"].numpy(),
+    ys_train=extdata["ys"].numpy(),
+    xgbc_kwargs={"n_estimators": 40},
+)
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = run_one_episode_all_obsd(
+        x=_data["xs"],
+        classifier=tclassifier,
         cost_est=lambda x: knn_cost_est(
             x,
             lmbda=lmbda,
