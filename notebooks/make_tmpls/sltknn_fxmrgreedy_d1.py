@@ -542,13 +542,7 @@ def precomp_rwds_for_tmpls(
     # (n_data,  n_cands, n_labels)
     pyhats: th.Tensor = th.empty((len(txs), n_cands, n_labels), dtype=th.float32)
     # (n_data,  n_cands)
-    cels: th.Tensor = th.empty(
-        (
-            len(txs),
-            n_cands,
-        ),
-        dtype=th.float32,
-    )
+    cels: th.Tensor = th.empty((len(txs), n_cands), dtype=th.float32)
     rwds: th.Tensor = th.empty_like(cels)
     pbar = tqdm.tqdm(
         th.split(th.arange(0, len(txs), dtype=th.long), bsz),
@@ -1048,7 +1042,7 @@ def run_one_episode(
     assert fcomb is not None
     acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
     acts[0, fcomb] = 1
-    pyhats: th.Tensor = classifier.predict_proba(x[None, :], acts)
+    pyhats: th.Tensor = classifier.predict_proba(x[None, :] * acts, acts)
     return pyhats[0], fobsd_l, fcomb
 
 
