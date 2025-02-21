@@ -1021,7 +1021,7 @@ def run_one_episode(
         _m[fobsd_l] = 1
         # forward prop. cost est.
         # (1, 2 * n_covs)
-        _inps: th.Tensor = th.cat((x, _m))[None, :]
+        _inps: th.Tensor = th.cat((x * _m, _m))[None, :]
         # (1, n_tmpls)
         _costs: th.Tensor = cost_est(_inps.to(device=plf.device)).to(device="cpu")
         _fcomb_idx: int = int(th.argmin(_costs[0]).item())
@@ -1064,7 +1064,7 @@ def run_one_episode_all_obsd(
         _m[fobsd_l] = 1
         # forward prop. cost est.
         # (1, 2 * n_covs)
-        _inps: th.Tensor = th.cat((x, _m))[None, :]
+        _inps: th.Tensor = th.cat((x * _m, _m))[None, :]
         # (1, n_tmpls)
         _costs: th.Tensor = cost_est(_inps.to(device=plf.device)).to(device="cpu")
         _fcomb_idx: int = int(th.argmin(_costs[0]).item())
