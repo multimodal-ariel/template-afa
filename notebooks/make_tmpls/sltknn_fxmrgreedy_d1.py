@@ -169,13 +169,19 @@ def _ident_init_fidx_single(
     for _i in tqdm.trange(
         n_iter, desc="ident_init_fidx_single", leave=False, dynamic_ncols=True
     ):
+        # (n_covs, )
         _bfm: th.Tensor = fms[_i]
+        # (bsz, )
         _btidxs: th.Tensor = th.randint(0, len(tdata), (bsz,))
+        # (bsz, n_covs)
         _btdata: thd.TensorDict = tdata[_btidxs]
         _bfms: th.Tensor = _bfm[None, :].expand(bsz, -1)
+        # (bsz, n_labels)
         _bpyhats: th.Tensor = classifier.predict_proba(_btdata["xs"], _bfms)
+        _blyhats: th.Tensor = torch.distributions.utils.probs_to_logits(_bpyhats)
+        # ()
         _bcosts: th.Tensor = th.nn.functional.cross_entropy(
-            _bpyhats, _btdata["ys"]
+            _blyhats, _btdata["ys"]
         ) + lmbda * th.sum(_bfm)
         best_mask_cost = th.minimum(
             best_mask_cost, th.where(_bfm == 1, _bcosts, th.inf)
