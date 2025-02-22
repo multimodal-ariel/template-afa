@@ -965,6 +965,7 @@ def knn_cost_est(
     tmpls: th.Tensor,
     n_neighs: int,
     p: float = 2,
+    is_train: bool = False,
 ) -> th.Tensor:
     """use knn strategy to compute cost
 
@@ -976,6 +977,7 @@ def knn_cost_est(
         tmpls (th.Tensor): (n_tmpls, n_covs)
         n_neighs (int): number of neighbors
         p (float, optional): p-norm distance. Defaults to 2.
+        is_train (bool, optional): whether the given `inps` is from training set. Defaults to `False`.
 
     Returns::
         th.Tensor: (n, n_tmpls) costs of using each template
@@ -986,6 +988,7 @@ def knn_cost_est(
     txs = txs.to(device=device)
     tcels = tcels.to(device=device)
     costs_l: list[th.Tensor] = list()
+    n_neighs = n_neighs + 1 if is_train else n_neighs
     for _inp in inps:
         # (n_covs, )
         _inp: th.Tensor
@@ -1000,6 +1003,7 @@ def knn_cost_est(
             n_neighs=n_neighs,
             p=p,
         )[1][0].to(device="cpu")
+        _knnidxs = _knnidxs[1:] if is_train else _knnidxs
         # (n_tmpls, )
         _cels: th.Tensor = th.mean(tcels[_knnidxs], dim=0)
         _costs: th.Tensor = _cels + lmbda * th.sum(_fm_avail, dim=1)
