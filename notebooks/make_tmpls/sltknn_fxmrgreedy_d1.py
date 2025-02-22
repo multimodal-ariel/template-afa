@@ -960,7 +960,7 @@ def _knn(
 def knn_cost_est(
     inps: th.Tensor,
     lmbda: float,
-    tinps: th.Tensor,
+    txs: th.Tensor,
     tcels: th.Tensor,
     tmpls: th.Tensor,
     n_neighs: int,
@@ -971,7 +971,7 @@ def knn_cost_est(
     Args:
         inps (th.Tensor): (n, n_covs * 2)
         lmbda (float): feature penalty
-        tinps (th.Tensor): (n, n_covs)
+        txs (th.Tensor): (n, n_covs)
         tcels (th.Tensor): (n, n_tmpls)
         tmpls (th.Tensor): (n_tmpls, n_covs)
         n_neighs (int): number of neighbors
@@ -981,9 +981,9 @@ def knn_cost_est(
         th.Tensor: (n, n_tmpls) costs of using each template
     """
     # th.Tensor: (n, n_tmpls) costs of using each template
-    n_covs: int = tinps.shape[1]
+    n_covs: int = txs.shape[1]
     device: th.device = inps.device
-    tinps = tinps.to(device=device)
+    txs = txs.to(device=device)
     tcels = tcels.to(device=device)
     costs_l: list[th.Tensor] = list()
     for _inp in inps:
@@ -996,14 +996,13 @@ def knn_cost_est(
         # (n_neighs, )
         _knnidxs: th.Tensor = _knn(
             xs=_inp[None, _fc].to(device=device),
-            txs=tinps[:, _fc].to(device=device),
+            txs=txs[:, _fc].to(device=device),
             n_neighs=n_neighs,
             p=p,
         )[1][0].to(device="cpu")
-        # (n_neighs, n_tmpls)
-        _cels: th.Tensor = tcels[_knnidxs]
-        _costs: th.Tensor = _cels + lmbda * th.sum(_fm_avail[None, :, :], dim=2)
-        _costs = th.mean(_costs, dim=0)
+        # (n_tmpls, )
+        _cels: th.Tensor = th.mean(tcels[_knnidxs], dim=0)
+        _costs: th.Tensor = _cels + lmbda * th.sum(_fm_avail, dim=1)
         costs_l.append(_costs)
     costs: th.Tensor = th.stack(costs_l, dim=0).to(device=device)
     return costs
@@ -1014,7 +1013,7 @@ def run_one_episode(
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     cost_est: Callable[[th.Tensor], th.Tensor],
     init_fidx: int,
-    allfcombs_l: list[tuple[int, ...]],
+    tmpls: th.Tensor,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
     if isinstance(cost_est, th.nn.Module):
@@ -1023,28 +1022,19 @@ def run_one_episode(
     fcomb: tuple[int, ...] | None = None
     for _ in itrtls.count():
         # make feature bit mask
-        _m: th.Tensor = th.zeros_like(x)
-        _m[fobsd_l] = 1
+        _fm: th.Tensor = th.zeros_like(x)
+        _fm[fobsd_l] = 1
         # forward prop. cost est.
         # (1, 2 * n_covs)
-        _inps: th.Tensor = th.cat((x * _m, _m))[None, :]
+        _inps: th.Tensor = th.cat((x * _fm, _fm))[None, :]
         # (1, n_tmpls)
         _costs: th.Tensor = cost_est(_inps.to(device=plf.device)).to(device="cpu")
-        _fcomb_idx: int = int(th.argmin(_costs[0]).item())
-        _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
-        # ident. unacquired features
-        _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
-        if len(_tmp_fcomb) == 0:
-            fcomb = _tmpl_fcomb
+        _tmpl_idx: int = int(th.argmin(_costs[0]).item())
+        _fm_avail: th.Tensor = th.maximum(tmpls[_tmpl_idx] - _fm, th.as_tensor(0.0))
+        if th.sum(_fm_avail) == 0:
+            fcomb = tuple(th.argwhere(tmpls[_tmpl_idx] == 1).flatten().tolist())
             break
-        # randomly choose a feature to acquire
-        _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
-        # add acquired feature to fcomb
-        fobsd_l.append(_tmp_fcomb[_tmp_fcomb_idx])
-        # terminate acq. if all features in template has been satisfied
-        if all([fidx in fobsd_l for fidx in _tmpl_fcomb]):
-            fcomb = _tmpl_fcomb
-            break
+        fobsd_l.append(int(th.argmax(_fm_avail).item()))
     assert fcomb is not None
     acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
     acts[0, fcomb] = 1
@@ -1057,38 +1047,26 @@ def run_one_episode_all_obsd(
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     cost_est: Callable[[th.Tensor], th.Tensor],
     init_fidx: int,
-    allfcombs_l: list[tuple[int, ...]],
+    tmpls: th.Tensor,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
     if isinstance(cost_est, th.nn.Module):
         cost_est.eval().to(device=plf.device)
     fobsd_l: list[int] = [init_fidx]
-    fcomb: tuple[int, ...] | None = None
     for _ in itrtls.count():
         # make feature bit mask
-        _m: th.Tensor = th.zeros_like(x)
-        _m[fobsd_l] = 1
+        _fm: th.Tensor = th.zeros_like(x)
+        _fm[fobsd_l] = 1
         # forward prop. cost est.
         # (1, 2 * n_covs)
-        _inps: th.Tensor = th.cat((x * _m, _m))[None, :]
+        _inps: th.Tensor = th.cat((x * _fm, _fm))[None, :]
         # (1, n_tmpls)
         _costs: th.Tensor = cost_est(_inps.to(device=plf.device)).to(device="cpu")
-        _fcomb_idx: int = int(th.argmin(_costs[0]).item())
-        _tmpl_fcomb: tuple[int, ...] = allfcombs_l[_fcomb_idx]
-        # ident. unacquired features
-        _tmp_fcomb: list[int] = [fidx for fidx in _tmpl_fcomb if fidx not in fobsd_l]
-        if len(_tmp_fcomb) == 0:
-            fcomb = _tmpl_fcomb
+        _tmpl_idx: int = int(th.argmin(_costs[0]).item())
+        _fm_avail: th.Tensor = th.maximum(tmpls[_tmpl_idx] - _fm, th.as_tensor(0.0))
+        if th.sum(_fm_avail) == 0:
             break
-        # randomly choose a feature to acquire
-        _tmp_fcomb_idx = int(th.randint(0, len(_tmp_fcomb), size=(1,)).item())
-        # add acquired feature to fcomb
-        fobsd_l.append(_tmp_fcomb[_tmp_fcomb_idx])
-        # terminate acq. if all features in template has been satisfied
-        if all([fidx in fobsd_l for fidx in _tmpl_fcomb]):
-            fcomb = _tmpl_fcomb
-            break
-    assert fcomb is not None
+        fobsd_l.append(int(th.argmax(_fm_avail).item()))
     fcomb = tuple(sorted(fobsd_l))
     acts: th.Tensor = th.zeros((1, x.shape[0]), dtype=th.long, device=x.device)
     acts[0, fobsd_l] = 1
@@ -1265,14 +1243,14 @@ for _data in vdata:
         cost_est=lambda x: knn_cost_est(
             x,
             lmbda=lmbda,
-            tinps=tdata["xs"],
+            txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
             n_neighs=2,
             p=2,
         ),
         init_fidx=init_fidx,
-        allfcombs_l=feature_masks_to_feature_combs(tmpls),
+        tmpls=tmpls,
         plf=plf,
     )
     snfobsd_l.append(len(_fobsd_l))
@@ -1308,14 +1286,14 @@ for _data in vdata:
         cost_est=lambda x: knn_cost_est(
             x,
             lmbda=lmbda,
-            tinps=tdata["xs"],
+            txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
             n_neighs=2,
             p=2,
         ),
         init_fidx=init_fidx,
-        allfcombs_l=feature_masks_to_feature_combs(tmpls),
+        tmpls=tmpls,
         plf=plf,
     )
     snfobsd_l.append(len(_fobsd_l))
@@ -1351,14 +1329,14 @@ for _data in vdata:
         cost_est=lambda x: knn_cost_est(
             x,
             lmbda=lmbda,
-            tinps=tdata["xs"],
+            txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
             n_neighs=2,
             p=2,
         ),
         init_fidx=init_fidx,
-        allfcombs_l=feature_masks_to_feature_combs(tmpls),
+        tmpls=tmpls,
         plf=plf,
     )
     snfobsd_l.append(len(_fobsd_l))
