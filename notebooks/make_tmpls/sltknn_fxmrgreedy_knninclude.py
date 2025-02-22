@@ -649,15 +649,18 @@ def make_templates_from_candidates_nearest_neighbors(
     tpcomp: thd.TensorDict,
     ctmpls: th.Tensor,
     n_tmpls: int,
-    n_neighs: int,
     plf: pl.Fabric,
     log_prefix: Optional[str] = "mk_tmpl_knn",
 ) -> tuple[th.Tensor, th.Tensor]:
     # (n_data, n_neighs, n_cands)
-    knn_idxs: th.Tensor = th.argsort(tpcomp["dists"], dim=1)[:, 1 : n_neighs + 1, :]
+    knnidxs: th.Tensor = tpcomp["knnidxs"]
     # (n_data, n_cands)
     rwds: th.Tensor = tpcomp["rwds"]
     costs: th.Tensor = -rwds
+    costs = th.mean(
+        th.gather(costs[:, None, :].expand(-1, len(costs), -1), dim=1, index=knnidxs),
+        dim=1,
+    )
     # template selected
     # **minimize cost**
     slctd_ms: th.Tensor = th.zeros((len(ctmpls)), dtype=th.bool)
@@ -665,12 +668,8 @@ def make_templates_from_candidates_nearest_neighbors(
     for _i in pbar:
         # start off with best template in the set
         if th.sum(slctd_ms) == 0:
-            # (n_data, n_neighs, n_cands)
-            _costs: th.Tensor = th.gather(
-                costs[:, None, :].expand(-1, len(costs), -1), dim=1, index=knn_idxs
-            )
             # (n_cands, )
-            _fitns: th.Tensor = th.mean(_costs, dim=(0, 1))
+            _fitns: th.Tensor = th.mean(costs, dim=0)
             _slctd: int = int(th.argmin(_fitns).item())
             slctd_ms[_slctd] = True
             metrics_d: dict[str, float] = {
@@ -969,6 +968,7 @@ def make_templates_fix_rounds(
     return tmpls
 
 
+@th.no_grad()
 def make_templates_fix_rounds_nearest_neighbors(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
@@ -1028,28 +1028,29 @@ def make_templates_fix_rounds_nearest_neighbors(
             lmbda=lmbda,
             bsz=bsz,
         )
-        tpcomp["dists"] = th.stack(
-            [
-                th.as_tensor(
-                    sp_spatial.distance.squareform(
-                        th.pdist(tdata["xs"][:, m]).numpy(force=True)
-                    ),
-                    dtype=th.float32,
-                )
-                for m in tqdm.tqdm(
-                    ctmpls.to(dtype=th.bool),
-                    desc="tpcomp knn",
-                    leave=False,
-                    dynamic_ncols=True,
-                )
-            ],
-            dim=2,
+        tpcomp["knnidxs"] = th.empty(
+            (len(_tdata), n_neighs, len(ctmpls)), dtype=th.long
         )
+        for _j, m in tqdm.tqdm(
+            enumerate(ctmpls.to(dtype=th.bool)),
+            desc="tpcomp knn",
+            total=len(ctmpls),
+            leave=False,
+            dynamic_ncols=True,
+        ):
+            _dists: th.Tensor = th.as_tensor(
+                sp_spatial.distance.squareform(
+                    th.pdist(tdata["xs"][:, m]).numpy(force=True)
+                ),
+                dtype=th.float32,
+            )
+            tpcomp["knnidxs"][:, :, _j] = th.argsort(_dists, dim=1, descending=False)[
+                :, 1 : n_neighs + 1
+            ]
         tmpls, slctd_ms = make_templates_from_candidates_nearest_neighbors(
             tpcomp=tpcomp,
             ctmpls=ctmpls,
             n_tmpls=n_tmpls_targ,
-            n_neighs=n_neighs,
             plf=plf,
             log_prefix=f"fixrounds_mktmpl{_i}_knn",
         )
@@ -1315,7 +1316,7 @@ metrics_func = thm.MetricCollection(
 init_fidx: int = 35
 n_neighs: int = 10
 n_tmpls_targ: int = 128
-n_cands_targ: int = 10_000
+n_cands_targ: int = 3_000
 lmbda: float = 0.075
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
@@ -1328,7 +1329,7 @@ bsz: int = 8192
 # %%
 # configure logger and ckpt path
 output_dir: str = os.path.join(
-    "outputs", "run", data_name, "sltknn_fxmrgreedy_fixrounds"
+    "outputs", "run", data_name, "sltknn_fxmrgreedy_fixrounds_knn"
 )
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
@@ -1451,7 +1452,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=n_neighs,
             p=2,
         ),
         init_fidx=init_fidx,
@@ -1489,7 +1490,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=n_neighs,
             p=2,
         ),
         init_fidx=init_fidx,
@@ -1527,7 +1528,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=n_neighs,
             p=2,
         ),
         init_fidx=init_fidx,
