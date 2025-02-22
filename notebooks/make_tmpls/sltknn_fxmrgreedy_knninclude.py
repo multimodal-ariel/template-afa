@@ -6,6 +6,7 @@ import math
 import os
 from typing import Callable, Optional
 
+import _classifiers
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
 import mydatasets.aaco
@@ -14,12 +15,12 @@ import mymodels.classifiers
 import mymodels.nn
 import mymodels.protocols
 import pandas as pd
+import scipy.spatial as sp_spatial
 import tensordict as thd
 import torch as th
 import torch.distributions.utils
 import torchmetrics as thm
 import tqdm.auto as tqdm
-import _classifiers
 
 
 # %%
@@ -644,6 +645,75 @@ def make_templates_from_candidates(
     return tmpls, slctd_ms
 
 
+def make_templates_from_candidates_nearest_neighbors(
+    tpcomp: thd.TensorDict,
+    ctmpls: th.Tensor,
+    n_tmpls: int,
+    n_neighs: int,
+    plf: pl.Fabric,
+    log_prefix: Optional[str] = "mk_tmpl_knn",
+) -> tuple[th.Tensor, th.Tensor]:
+    # (n_data, n_neighs, n_cands)
+    knn_idxs: th.Tensor = th.argsort(tpcomp["dists"], dim=1)[:, 1 : n_neighs + 1, :]
+    # (n_data, n_cands)
+    rwds: th.Tensor = tpcomp["rwds"]
+    costs: th.Tensor = -rwds
+    # template selected
+    # **minimize cost**
+    slctd_ms: th.Tensor = th.zeros((len(ctmpls)), dtype=th.bool)
+    pbar = tqdm.trange(n_tmpls, desc="make templates", leave=False, dynamic_ncols=True)
+    for _i in pbar:
+        # start off with best template in the set
+        if th.sum(slctd_ms) == 0:
+            # (n_data, n_neighs, n_cands)
+            _costs: th.Tensor = th.gather(
+                costs[:, None, :].expand(-1, len(costs), -1), dim=1, index=knn_idxs
+            )
+            # (n_cands, )
+            _fitns: th.Tensor = th.mean(_costs, dim=(0, 1))
+            _slctd: int = int(th.argmin(_fitns).item())
+            slctd_ms[_slctd] = True
+            metrics_d: dict[str, float] = {
+                "cost": th.mean(th.min(costs[:, slctd_ms], dim=1)[0]).item(),
+                "fitness": _fitns[_slctd].item(),
+            }
+            pbar.set_postfix(metrics_d)
+            if log_prefix is not None:
+                metrics_d = mylib.utils.add_prefix_to_dict(metrics_d, log_prefix)
+            plf.log_dict(metrics_d, _i)
+            continue
+        # compute currently selected template set cost for each instance
+        # (n_data, )
+        _slctd_costs = th.min(costs[:, slctd_ms], dim=1)[0]
+        # compute potential improvements of each available template for each instance
+        # (n_data, n_avail_cands)
+        _adj_costs: th.Tensor = costs[:, ~slctd_ms] - _slctd_costs[:, None]
+        _adj_costs = th.where(_adj_costs < 0.0, _adj_costs, 0.0)
+        # compute average improvements over all instances for each template
+        # already selected template is masked out
+        # (n_cands, )
+        _fitns: th.Tensor = th.zeros((len(ctmpls),))
+        _fitns[~slctd_ms] = th.mean(_adj_costs, dim=0)
+        # terminate loop early if no improvement is made
+        if not th.any(_fitns < 0.0):
+            break
+        # include template with best improvement
+        _slctd: int = int(th.argmin(_fitns).item())
+        slctd_ms[_slctd] = True
+        # update progress bar
+        metrics_d: dict[str, float] = {
+            "cost": th.mean(th.min(costs[:, slctd_ms], dim=1)[0]).item(),
+            "fitness": _fitns[_slctd].item(),
+        }
+        pbar.set_postfix(metrics_d)
+        if log_prefix is not None:
+            metrics_d = mylib.utils.add_prefix_to_dict(metrics_d, log_prefix)
+        plf.log_dict(metrics_d, _i)
+    pbar.close()
+    tmpls: th.Tensor = ctmpls[slctd_ms]
+    return tmpls, slctd_ms
+
+
 def make_templates_vanilla(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
@@ -899,6 +969,114 @@ def make_templates_fix_rounds(
     return tmpls
 
 
+def make_templates_fix_rounds_nearest_neighbors(
+    tdata: thd.TensorDict,
+    max_tdata: Optional[int],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    n_tmpls_targ: int,
+    n_cands_init: int,
+    min_features: int,
+    max_features: Optional[int],
+    n_rounds: int,
+    use_feature_importance_sampling: bool,
+    lmbda: float,
+    n_neighs: int,
+    bsz: int,
+    vdata: Optional[thd.TensorDict],
+    metrics_func: thm.MetricCollection,
+    plf: pl.Fabric,
+) -> th.Tensor:
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    ctmpls: th.Tensor | None = None
+    tmpls: th.Tensor | None = None
+    slctd_ms: th.Tensor | None = None
+    for _i in tqdm.trange(
+        n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
+    ):
+        if ctmpls is None or tmpls is None or slctd_ms is None:
+            # initialize candidate pool
+            ctmpls = make_template_candidates(
+                n_covs=n_covs,
+                init_fidx=init_fidx,
+                n_cands_targ=n_cands_init,
+                min_features=min_features,
+                max_features=max_features,
+            )
+        else:
+            # update candidate pool from existing templates
+            ctmpls = update_template_candidates_fix_rounds(
+                ctmpls=ctmpls,
+                slctd_ms=slctd_ms,
+                init_fidx=init_fidx,
+                min_features=min_features,
+                max_features=max_features,
+                use_feature_importance_sampling=use_feature_importance_sampling,
+            )
+        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+            classifier.fit_(ctmpls)
+        _tdata = (
+            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        )
+        tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+            ctmpls,
+            data=_tdata,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+        )
+        tpcomp["dists"] = th.stack(
+            [
+                th.as_tensor(
+                    sp_spatial.distance.squareform(
+                        th.pdist(tdata["xs"][:, m]).numpy(force=True)
+                    ),
+                    dtype=th.float32,
+                )
+                for m in tqdm.tqdm(
+                    ctmpls.to(dtype=th.bool),
+                    desc="tpcomp knn",
+                    leave=False,
+                    dynamic_ncols=True,
+                )
+            ],
+            dim=2,
+        )
+        tmpls, slctd_ms = make_templates_from_candidates_nearest_neighbors(
+            tpcomp=tpcomp,
+            ctmpls=ctmpls,
+            n_tmpls=n_tmpls_targ,
+            n_neighs=n_neighs,
+            plf=plf,
+            log_prefix=f"fixrounds_mktmpl{_i}_knn",
+        )
+        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+            classifier.fit_(tmpls)
+        if vdata is not None:
+            metrics_d: dict[str, float] = _eval_oracle(
+                data=vdata,
+                classifier=classifier,
+                tmpls=tmpls,
+                lmbda=lmbda,
+                bsz=bsz,
+                metrics_func=metrics_func,
+            )
+            metrics_d.update(
+                {
+                    "minfeats": min_features,
+                    "maxfeats": max_features,
+                }
+            )
+            plf.log_dict(
+                mylib.utils.add_prefix_to_dict(metrics_d, "train_fixrounds_knn"), _i
+            )
+    assert tmpls is not None
+    return tmpls
+
+
 def _eval_oracle(
     data: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -1135,6 +1313,7 @@ metrics_func = thm.MetricCollection(
     }
 )
 init_fidx: int = 35
+n_neighs: int = 10
 n_tmpls_targ: int = 128
 n_cands_targ: int = 10_000
 lmbda: float = 0.075
@@ -1227,6 +1406,26 @@ tmpls = make_templates_fix_rounds(
 )
 
 # %%
+tmpls = make_templates_fix_rounds_nearest_neighbors(
+    tdata=tdata,
+    max_tdata=max_tdata,
+    classifier=tclassifier,
+    init_fidx=init_fidx,
+    n_tmpls_targ=n_tmpls_targ,
+    n_cands_init=n_cands_targ,
+    min_features=min_features_targ,
+    max_features=max_features_targ,
+    n_rounds=n_rounds,
+    use_feature_importance_sampling=use_feature_importance_sampling,
+    lmbda=lmbda,
+    n_neighs=n_neighs,
+    bsz=bsz,
+    vdata=vdata,
+    metrics_func=metrics_func,
+    plf=plf,
+)
+
+# %%
 tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
     tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz
 )
@@ -1238,7 +1437,7 @@ vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
     xgbc_kwargs={"n_estimators": 40},
 )
 
-#%%
+# %%
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
