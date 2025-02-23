@@ -879,7 +879,7 @@ def make_templates_fix_rounds_nearest_neighbors(
         ):
             _dists: th.Tensor = th.as_tensor(
                 sp_spatial.distance.squareform(
-                    th.pdist(tdata["xs"][:, m]).numpy(force=True)
+                    th.pdist(_tdata["xs"][:, m]).numpy(force=True)
                 ),
                 dtype=th.float32,
             )
