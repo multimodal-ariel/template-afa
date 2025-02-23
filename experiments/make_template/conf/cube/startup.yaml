@@ -11,16 +11,14 @@ data:
   _target_: mydatasets.aaco.load_aaco_data
   name: cube_20_0.3
   to_normalize: false
-classifier:
+tclassifier:
   _target_: _classifiers.SubsetFeatureNaiveBayes
   std: 0.3
+vclassifier: null
+# make_templates_fn:
+#   TODO override this
+#   _target_: ...
 init_fidx: 6
-n_tmpls_targ: 64
-n_cands_targ: 10_000
-min_features_targ: 1
-max_features_targ: null
-min_features_init: 10
-feature_decrement: 2
 lmbda: 0.3
 bsz: 1024
-max_tdata: null
+n_neighs: 10

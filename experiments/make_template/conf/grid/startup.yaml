@@ -11,20 +11,21 @@ data:
   _target_: mydatasets.aaco.load_aaco_data
   name: grid_data
   to_normalize: true
-classifier:
+tclassifier:
   _target_: _classifiers.SubsetFeatureConcatXGBClassifier
   xgb_kwargs:
     n_estimators: 40
   fraction_training_data_per_split: 1.0
   n_splits: 64
   n_tmpl_per_instance: 4
+vclassifier:
+  _target_: mymodels.classifiers.SubsetFeatureXGBClassifier
+  xgbc_kwargs:
+    n_estimators: 40
+# make_templates_fn:
+#   TODO override this
+#   _target_: ...
 init_fidx: 1
-n_tmpls_targ: 128
-n_cands_targ: 10_000
-min_features_targ: 1
-max_features_targ: null
-min_features_init: 8
-feature_decrement: 2
-lmbda: 0.1
+lmbda: 0.5
+n_neighs: 10
 bsz: 1024
-max_tdata: null

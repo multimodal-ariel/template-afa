@@ -19,7 +19,7 @@ tclassifier:
   n_splits: 64
   n_tmpl_per_instance: 4
 vclassifier:
-  _target_: _classifiers.SubsetFeatureXGBClassifier
+  _target_: mymodels.classifiers.SubsetFeatureXGBClassifier
   xgbc_kwargs:
     n_estimators: 40
 # make_templates_fn:
@@ -29,4 +29,3 @@ init_fidx: 31
 lmbda: 0.075
 n_neighs: 10
 bsz: 1024
-max_tdata: 6000
