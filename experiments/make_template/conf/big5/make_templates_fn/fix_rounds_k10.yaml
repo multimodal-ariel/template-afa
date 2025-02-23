@@ -1,0 +1,8 @@
+_target_: make_templates_fix_rounds_nearest_neighbors
+n_tmpls_targ: 128
+n_cands_init: 10_000
+min_features: 1
+max_features: null
+n_rounds: 5
+use_feature_importance_sampling: true
+n_neighs: 10

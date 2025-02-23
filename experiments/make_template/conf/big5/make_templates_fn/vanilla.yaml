@@ -1,0 +1,5 @@
+_target_: make_templates_vanilla
+n_tmpls: 128
+n_cands: 10_000
+min_features: 1
+max_features: null
