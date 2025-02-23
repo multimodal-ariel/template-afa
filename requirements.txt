@@ -12,9 +12,11 @@ graphviz
 pygraphviz
 pyvis
 scikit-learn
+scikit-image
 interpret
 xgboost
 torch
+torchvision
 tensordict
 lightning
 torchmetrics
