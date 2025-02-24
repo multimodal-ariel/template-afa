@@ -32,22 +32,19 @@ def make_feature_masks(
     bincnt_fcs_l: list[int] = [
         # in order to accomondate for init_fidx,
         # both n_covs and i is one less than desired n_feats
-        math.comb(n_covs, i)
+        min(math.comb(n_covs, i), th.iinfo(th.long).max)
         for i in range(min_features, max_features + 1)
     ]
     n_masks = min(n_masks, sum(bincnt_fcs_l))
-    bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
-    ps: th.Tensor = bincnt_fcs.to(dtype=th.float64) / th.sum(bincnt_fcs)
+    bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l, dtype=th.long)
+    ps: th.Tensor = th.ones_like(bincnt_fcs, dtype=th.float32)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_masks, replacement=True), minlength=len(bincnt_fcs)
     )
     # in case number of actions in any of the bin exceeds maximum number of actions
     _curr_bincnts: th.Tensor = nfc_from_each_binned_fcs
     while th.any(_curr_bincnts > bincnt_fcs):
-        _tmp_ps: th.Tensor = th.where(
-            _curr_bincnts >= bincnt_fcs, 0, bincnt_fcs - _curr_bincnts
-        )
-        _tmp_ps = _tmp_ps.to(dtype=th.float64) / th.sum(_tmp_ps)
+        _tmp_ps: th.Tensor = th.where(_curr_bincnts >= bincnt_fcs, 0.0, 1.0)
         _realloc_cnts: th.Tensor = th.where(
             _curr_bincnts > bincnt_fcs, _curr_bincnts - bincnt_fcs, 0
         )
@@ -172,13 +169,13 @@ def make_template_candidates(
     bincnt_fcs_l: list[int] = [
         # in order to accomondate for init_fidx,
         # both n_covs and i is one less than desired n_feats
-        math.comb(n_covs - 1, i)
+        min(math.comb(n_covs - 1, i), th.iinfo(th.long).max)
         for i in range(
             min_features - 1, n_covs if max_features is None else max_features
         )
     ]
     n_cands: int = min(n_cands_targ, sum(bincnt_fcs_l))
-    bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l)
+    bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l, dtype=th.long)
     ps: th.Tensor = th.ones_like(bincnt_fcs, dtype=th.float32)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
         th.multinomial(ps, n_cands, replacement=True), minlength=len(bincnt_fcs)
@@ -296,7 +293,8 @@ def _fill_fcs_set_with_random_tmpls(
             for i in range(
                 min_features - 1, n_covs if max_features is None else max_features
             )
-        ]
+        ],
+        dtype=th.long,
     )
     n_cands_targ = (
         n_cands_targ if n_cands_targ <= th.sum(bincnt_fcs) else int(th.sum(bincnt_fcs))
