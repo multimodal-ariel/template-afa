@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import _tmplfns
 import hydra as hd
@@ -81,8 +81,10 @@ def main(cfg: MainConf):
         }
     )
     # make templates
-    tmpls: th.Tensor = hd.utils.call(
-        cfg.make_templates_fn,
+    make_templates_fn: Callable = hd.utils.instantiate(
+        cfg.make_templates_fn, _partial_=True
+    )
+    tmpls: th.Tensor = make_templates_fn(
         tdata=tdata,
         classifier=tclassifier,
         init_fidx=cfg.init_fidx,
