@@ -239,6 +239,8 @@ def _mutate_tmpls(
     }
     # previous template pool and exclude those that has no feature to mutate from
     tmpls_prv = tmpls_prv[th.sum(tmpls_prv, dim=1) - min_features > 0]
+    if len(tmpls_prv) == 0:
+        return fcs_set
     # mutate templates
     pbar = tqdm.trange(
         n_cands_targ, desc="mutate tmpl_prv", dynamic_ncols=True, leave=False
@@ -289,7 +291,7 @@ def _fill_fcs_set_with_random_tmpls(
         [
             # in order to accomondate for init_fidx,
             # both n_covs and i is one less than desired n_feats
-            math.comb(n_covs - 1, i)
+            min(math.comb(n_covs - 1, i), th.iinfo(th.long).max)
             for i in range(
                 min_features - 1, n_covs if max_features is None else max_features
             )
