@@ -22,6 +22,7 @@ import tqdm.auto as tqdm
 
 
 # %%
+@th.no_grad()
 def nnet_cost_est(
     inps: th.Tensor,
     nnet: th.nn.Module,
@@ -29,12 +30,12 @@ def nnet_cost_est(
     tmpls: th.Tensor,
     device: th.device,
 ) -> th.Tensor:
-    nnet.to(device=device)
+    nnet.eval().to(device=device)
     # (n_tmpls, n_covs)
     tmpls = tmpls.to(device=device)
     # (n, n_covs)
     inps = inps.to(device=device)
-    fms: th.Tensor = inps[n_covs:]
+    fms: th.Tensor = inps[:, n_covs:]
     # (n, n_tmpls)
     cels: th.Tensor = nnet(inps)
     # (n, n_tmpls, n_covs)
@@ -75,7 +76,9 @@ def compile_selector_dataset(
 
 
 @th.no_grad()
-def _make_fit_bsinps(bstdata: thd.TensorDict, tmpls: th.Tensor) -> th.Tensor:
+def _make_fit_bsinps(
+    bstdata: thd.TensorDict, init_fidx: int, tmpls: th.Tensor
+) -> th.Tensor:
     bsz: int = len(bstdata)
     n_tmpls: int = len(tmpls)
     # (bsz, )
@@ -85,8 +88,9 @@ def _make_fit_bsinps(bstdata: thd.TensorDict, tmpls: th.Tensor) -> th.Tensor:
     bfms: th.Tensor = tmpls[btmplidxs].to(device=bxs.device)
     n_covs: int = bxs.shape[1]
     # randomly drop features
-    bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs))
+    bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs), device=bxs.device)
     bnms = th.where(bfms == 0, 0, bnms)
+    bnms[:, init_fidx] = 1
     # (bsz, 2 * n_covs)
     bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
     return bsinps
@@ -103,6 +107,7 @@ class _TrainState(TypedDict):
 def _fit_iter(
     tstate: _TrainState,
     tloader: th_data.DataLoader,
+    init_fidx: int,
     tmpls: th.Tensor,
     pbar: tqdm.tqdm,
     plf: pl.Fabric,
@@ -114,7 +119,9 @@ def _fit_iter(
         bstdata: thd.TensorDict
         bstdata = bstdata.to(device=plf.device)
         # (bsz, 2 * n_covs)
-        bsinps: th.Tensor = _make_fit_bsinps(bstdata=bstdata, tmpls=tmpls)
+        bsinps: th.Tensor = _make_fit_bsinps(
+            bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
+        )
         # (bsz, n_tmpls)
         bsouts: th.Tensor = nnet(bsinps)
         # compute selector loss
@@ -144,6 +151,7 @@ def _fit_iter(
 def fit(
     tstate: _TrainState,
     stdata: thd.TensorDict,
+    init_fidx: int,
     tmpls: th.Tensor,
     n_iter: int,
     bsz: int,
@@ -160,6 +168,7 @@ def fit(
         metrics_d: dict[str, float] = _fit_iter(
             tstate=tstate,
             tloader=tloader,
+            init_fidx=init_fidx,
             tmpls=tmpls,
             pbar=pbar,
             plf=plf,
@@ -206,7 +215,7 @@ data_name: str = "big5_C_cls"
 _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 n_covs: int = _tdata["xs"].shape[1]
 n_labels: int = len(th.unique(_tdata["ys"]))
-max_tdata: Optional[int] = 8192
+max_tdata: Optional[int] = 6000
 _tdata_shuffle_idxs = th.randperm(len(_tdata))
 tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
 extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
@@ -232,10 +241,10 @@ metrics_func = thm.MetricCollection(
         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
     }
 )
-init_fidx: int = 35
+init_fidx: int = 31
 n_tmpls_targ: int = 128
 n_cands_targ: int = 10_000
-lmbda: float = 0.075
+lmbda: float = 0.05
 n_neighs: int = 10
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
@@ -246,7 +255,7 @@ bsz: int = 8192
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "vanilla")
+output_dir: str = os.path.join("outputs", "run", data_name, "nnet_mse")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -268,15 +277,17 @@ if init_fidx is None:
     )
 
 # %%
-tmpls = _tmplfns.make_templates_vanilla(
+tmpls: th.Tensor = _tmplfns.make_templates_fix_rounds(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
     init_fidx=init_fidx,
-    n_tmpls=n_tmpls_targ,
-    n_cands=n_cands_targ,
-    min_features=1,
+    n_tmpls_targ=n_tmpls_targ,
+    n_cands_init=n_cands_targ,
+    min_features=min_features_targ,
     max_features=max_features_targ,
+    n_rounds=n_rounds,
+    use_feature_importance_sampling=use_feature_importance_sampling,
     lmbda=lmbda,
     bsz=bsz,
     plf=plf_tmpl,
@@ -296,15 +307,18 @@ nnet = mymodels.nn.make_fcn(
         (tdata["xs"].shape[1], None, None, None),
     ],
 )
-opt = th.optim.Adam(nnet.parameters())
+
+# %%
+opt = th.optim.Adam(nnet.parameters(), lr=1e-4)
 
 # %%
 fit(
     tstate=_TrainState(nnet=nnet, opt=opt, n_trial_itr=0, n_fit_itr=0, opt_step=0),
     stdata=compile_selector_dataset(tdata, tpcomp),
+    init_fidx=init_fidx,
     tmpls=tmpls,
-    n_iter=1000,
-    bsz=1024,
+    n_iter=100_000,
+    bsz=512,
     plf=plf_nnet,
 )
 
@@ -377,3 +391,5 @@ metrics_d.update(
     }
 )
 print(pd.Series(metrics_d))
+
+# %%
