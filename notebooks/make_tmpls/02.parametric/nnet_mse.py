@@ -89,7 +89,7 @@ def _make_fit_bsinps(
     n_covs: int = bxs.shape[1]
     # randomly drop features
     bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs), device=bxs.device)
-    bnms = th.where(bfms == 0, 0, bnms)
+    bnms = th.clamp(bnms - bfms, 0.0, 1.0)
     bnms[:, init_fidx] = 1
     # (bsz, 2 * n_covs)
     bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
