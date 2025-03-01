@@ -103,7 +103,9 @@ def _make_fit_bsinps(
     # (bsz, 3 * n_covs)
     bsinps: th.Tensor = th.cat((bxs * bnms, bnms, bfms), dim=1)
     # (bsz, 1)
-    bstargs: th.Tensor = th.gather(bstdata["cels"], dim=1, index=btmplidxs[:, None])
+    bstargs: th.Tensor = th.gather(
+        bstdata["cels"], dim=1, index=btmplidxs[:, None].to(device=bxs.device)
+    )
     return bsinps, bstargs
 
 
@@ -311,7 +313,7 @@ tpcomp: thd.TensorDict = _tmplfns.precomp_rwds_for_tmpls(
 
 # %%
 nnet = mymodels.nn.make_fcn(
-    in_features=2 * tdata["xs"].shape[1],
+    in_features=3 * tdata["xs"].shape[1],
     out_features=1,
     layer_specs=[
         (tdata["xs"].shape[1], None, None, None),
