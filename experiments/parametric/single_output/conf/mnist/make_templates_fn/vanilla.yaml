@@ -1,0 +1,6 @@
+_target_: _tmplfns.make_templates_vanilla
+max_tdata: 6000
+n_tmpls: 1024
+n_cands: 20_000
+min_features: 1
+max_features: 32
