@@ -30,18 +30,27 @@ def nnet_cost_est(
     tmpls: th.Tensor,
     device: th.device,
 ) -> th.Tensor:
+    n_covs: int = tmpls.shape[1]
     nnet.eval().to(device=device)
     # (n_tmpls, n_covs)
     tmpls = tmpls.to(device=device)
-    # (n, n_covs)
+    # (n, 2 * n_covs)
     inps = inps.to(device=device)
-    fms: th.Tensor = inps[:, n_covs:]
-    # (n, n_tmpls)
-    cels: th.Tensor = nnet(inps)
+    # TODO might have to switch to looping over tmpl dim
+    # (n, n_tmpls, n_covs)
+    tmpls_: th.Tensor = tmpls[None, :, :].expand(len(inps), -1, -1)
+    # (n, n_tmpls, 2 * n_covs)
+    inps_: th.Tensor = inps[:, None, :].expand(-1, len(tmpls), -1)
+    # (n, n_covs)
+    fms: th.Tensor = inps[:, n_covs].to(device=device)
+    # (n * n_tmpls, 1)
+    cels_: th.Tensor = nnet(th.cat((inps_, tmpls_), dim=2).flatten(0, 1))
+    cels: th.Tensor = cels_[:, 0].unflatten(0, (len(inps), len(tmpls)))
     # (n, n_tmpls, n_covs)
     fms_avail: th.Tensor = th.maximum(
         tmpls[None, :, :] - fms[:, None, :], th.as_tensor(0.0, device=device)
     )
+    # (n, n_tmpls)
     costs: th.Tensor = cels + lmbda * th.sum(fms_avail, dim=2)
     return costs
 
@@ -78,7 +87,7 @@ def compile_selector_dataset(
 @th.no_grad()
 def _make_fit_bsinps(
     bstdata: thd.TensorDict, init_fidx: int, tmpls: th.Tensor
-) -> th.Tensor:
+) -> tuple[th.Tensor, th.Tensor]:
     bsz: int = len(bstdata)
     n_tmpls: int = len(tmpls)
     # (bsz, )
@@ -89,11 +98,15 @@ def _make_fit_bsinps(
     n_covs: int = bxs.shape[1]
     # randomly drop features
     bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs), device=bxs.device)
-    bnms = th.where(bfms == 0, 0, bnms)
+    bnms = th.clamp(bnms - bfms, 0.0, 1.0)
     bnms[:, init_fidx] = 1
-    # (bsz, 2 * n_covs)
-    bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
-    return bsinps
+    # (bsz, 3 * n_covs)
+    bsinps: th.Tensor = th.cat((bxs * bnms, bnms, bfms), dim=1)
+    # (bsz, 1)
+    bstargs: th.Tensor = th.gather(
+        bstdata["cels"], dim=1, index=btmplidxs[:, None].to(device=bxs.device)
+    )
+    return bsinps, bstargs
 
 
 class _TrainState(TypedDict):
@@ -118,15 +131,15 @@ def _fit_iter(
     for bstdata in tloader:
         bstdata: thd.TensorDict
         bstdata = bstdata.to(device=plf.device)
-        # (bsz, 2 * n_covs)
-        bsinps: th.Tensor = _make_fit_bsinps(
+        # (bsz, 3 * n_covs), (bsz, 1)
+        bsinps, bstargs = _make_fit_bsinps(
             bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
         )
-        # (bsz, n_tmpls)
+        # (bsz, 1)
         bsouts: th.Tensor = nnet(bsinps)
         # compute selector loss
         bslosses: th.Tensor = th.nn.functional.mse_loss(
-            bsouts, bstdata["cels"], reduction="none"
+            bsouts, bstargs, reduction="none"
         )
         bsloss: th.Tensor = th.mean(bslosses)
         # update selector parameter
