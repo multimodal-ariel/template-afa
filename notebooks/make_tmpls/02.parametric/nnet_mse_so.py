@@ -220,7 +220,7 @@ def fit(
 # lmbda: float = 0.3
 # bsz: int = 1024
 
-%%
+# %%
 # NOTE big5
 data_name: str = "big5_C_cls"
 _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
@@ -266,7 +266,7 @@ bsz: int = 8192
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "nnet_mse")
+output_dir: str = os.path.join("outputs", "run", data_name, "nnet_mse_so")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -312,7 +312,7 @@ tpcomp: thd.TensorDict = _tmplfns.precomp_rwds_for_tmpls(
 # %%
 nnet = mymodels.nn.make_fcn(
     in_features=2 * tdata["xs"].shape[1],
-    out_features=len(tmpls),
+    out_features=1,
     layer_specs=[
         (tdata["xs"].shape[1], None, None, None),
         (tdata["xs"].shape[1], None, None, None),
