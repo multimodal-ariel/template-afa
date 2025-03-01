@@ -30,6 +30,7 @@ def nnet_cost_est(
     tmpls: th.Tensor,
     device: th.device,
 ) -> th.Tensor:
+    n_covs: int = tmpls.shape[1]
     nnet.eval().to(device=device)
     # (n_tmpls, n_covs)
     tmpls = tmpls.to(device=device)
