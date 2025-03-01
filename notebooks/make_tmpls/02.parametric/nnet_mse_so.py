@@ -41,11 +41,11 @@ def nnet_cost_est(
     tmpls_: th.Tensor = tmpls[None, :, :].expand(len(inps), -1, -1)
     # (n, n_tmpls, 2 * n_covs)
     inps_: th.Tensor = inps[:, None, :].expand(-1, len(tmpls), -1)
-    # (n, n_covs)
-    fms: th.Tensor = inps[:, n_covs].to(device=device)
     # (n * n_tmpls, 1)
     cels_: th.Tensor = nnet(th.cat((inps_, tmpls_), dim=2).flatten(0, 1))
     cels: th.Tensor = cels_[:, 0].unflatten(0, (len(inps), len(tmpls)))
+    # (n, n_covs)
+    fms: th.Tensor = inps[:, n_covs:].to(device=device)
     # (n, n_tmpls, n_covs)
     fms_avail: th.Tensor = th.maximum(
         tmpls[None, :, :] - fms[:, None, :], th.as_tensor(0.0, device=device)
