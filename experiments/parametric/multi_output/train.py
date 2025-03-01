@@ -273,8 +273,9 @@ def main(cfg: MainConf):
     tpcomp: thd.TensorDict = _tmplfns.precomp_rwds_for_tmpls(
         tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=cfg.lmbda, bsz=cfg.bsz
     )
-    tstate = fit(
-        tstate=_TrainState(nnet=nnet, opt=opt, n_trial_itr=0, n_fit_itr=0, opt_step=0),
+    tstate = _TrainState(nnet=nnet, opt=opt, n_trial_itr=0, n_fit_itr=0, opt_step=0)
+    fit(
+        tstate=tstate,
         stdata=compile_selector_dataset(tdata, tpcomp),
         init_fidx=cfg.init_fidx,
         tmpls=tmpls,
