@@ -27,7 +27,8 @@ def make_templates_fix_rounds_minibatch(
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     init_fidx: int,
     n_tmpls_targ: int,
-    n_cands_init: int,
+    n_cands_targ: int,
+    n_cands_targ_minibatch: int,
     min_features: int,
     max_features: Optional[int],
     n_rounds: int,
@@ -46,6 +47,15 @@ def make_templates_fix_rounds_minibatch(
         n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
     ):
         if ctmpls is None or tmpls is None or slctd_ms is None:
+            tclassifier.fit_(
+                _tmplfns.make_template_candidates(
+                    n_covs=n_covs,
+                    init_fidx=init_fidx,
+                    n_cands_targ=max(n_cands_targ, n_cands_targ_minibatch),
+                    min_features=min_features,
+                    max_features=max_features,
+                )
+            )
             ctmpls = th.cat(
                 [
                     _tmplfns.make_templates_vanilla(
@@ -56,16 +66,17 @@ def make_templates_fix_rounds_minibatch(
                         ],
                         max_tdata=None,
                         classifier=classifier,
+                        to_update_classifier=False,
                         init_fidx=init_fidx,
                         n_tmpls=n_tmpls_targ,
-                        n_cands=n_cands_init,
+                        n_cands=n_cands_targ_minibatch,
                         min_features=min_features,
                         max_features=max_features,
                         lmbda=lmbda,
                         bsz=bsz,
                         plf=plf,
                     )
-                    for _ in range(math.ceil(n_cands_init / n_tmpls_targ))
+                    for _ in range(math.ceil(n_cands_targ / n_tmpls_targ))
                 ],
                 dim=0,
             )
@@ -77,13 +88,13 @@ def make_templates_fix_rounds_minibatch(
                     ctmpls=_ctmpls_prv,
                     slctd_ms=slctd_ms,
                     init_fidx=init_fidx,
-                    n_cands_init=n_cands_init,
-                    n_cands_targ=n_cands_init,
+                    n_cands_init=n_cands_targ_minibatch,
+                    n_cands_targ=n_cands_targ_minibatch,
                     min_features=min_features,
                     max_features=max_features,
                     use_feature_importance_sampling=use_feature_importance_sampling,
                 )
-                for _ in range(math.ceil(n_cands_init / n_tmpls_targ))
+                for _ in range(math.ceil(n_cands_targ / n_tmpls_targ))
             ]
             ctmpls = th.cat(
                 [
@@ -194,20 +205,21 @@ metrics_func = thm.MetricCollection(
 )
 init_fidx: int = 35
 n_tmpls_targ: int = 128
-n_cands_targ: int = 10_000
+n_cands_targ: int = 5_000
+n_cands_targ_minibatch: int = 10_000
 lmbda: float = 0.075
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
 min_features_init: int = 10
-minibatch_size: int = n_labels * 10
+minibatch_size: int = 64
 n_rounds: int = 3
 feature_decrement: int = 2
 use_feature_importance_sampling: bool = True
-bsz: int = 8192
+bsz: int = 1024
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "fixrounds")
+output_dir: str = os.path.join("outputs", "run", data_name, "fixrounds_minibatch")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -235,7 +247,8 @@ tmpls = make_templates_fix_rounds_minibatch(
     classifier=tclassifier,
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
-    n_cands_init=n_cands_targ,
+    n_cands_targ=n_cands_targ,
+    n_cands_targ_minibatch=n_cands_targ_minibatch,
     min_features=min_features_targ,
     max_features=max_features_targ,
     n_rounds=n_rounds,

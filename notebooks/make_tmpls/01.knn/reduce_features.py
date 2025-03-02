@@ -112,6 +112,7 @@ tmpls = _tmplfns.make_templates_reduce_features(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
+    to_update_classifier=True,
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
     n_cands_targ=n_cands_targ,

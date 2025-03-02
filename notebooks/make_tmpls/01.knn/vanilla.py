@@ -92,9 +92,7 @@ bsz: int = 8192
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join(
-    "outputs", "run", data_name, "vanilla"
-)
+output_dir: str = os.path.join("outputs", "run", data_name, "vanilla")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -119,6 +117,7 @@ tmpls = _tmplfns.make_templates_vanilla(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
+    to_update_classifier=True,
     init_fidx=init_fidx,
     n_tmpls=n_tmpls_targ,
     n_cands=n_cands_targ,
