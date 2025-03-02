@@ -398,6 +398,7 @@ def update_template_candidates_fix_rounds(
     slctd_ms: th.Tensor,
     init_fidx: int,
     n_cands_init: int,
+    n_cands_targ: int | None,
     min_features: int,
     max_features: Optional[int],
     use_feature_importance_sampling: bool,
@@ -406,7 +407,9 @@ def update_template_candidates_fix_rounds(
     fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
         tmpls_prv=tmpls_prv,
         init_fidx=init_fidx,
-        n_cands_targ=2 * len(tmpls_prv),
+        n_cands_targ=min(
+            2 * len(tmpls_prv) if n_cands_targ is None else n_cands_targ, n_cands_init
+        ),
         min_features=min_features,
     )
     n_covs: int = ctmpls.shape[1]
@@ -414,7 +417,9 @@ def update_template_candidates_fix_rounds(
         fcs_set=fcs_set,
         n_covs=n_covs,
         init_fidx=init_fidx,
-        n_cands_targ=min(5 * len(tmpls_prv), n_cands_init),
+        n_cands_targ=min(
+            5 * len(tmpls_prv) if n_cands_targ is None else n_cands_targ, n_cands_init
+        ),
         min_features=min_features,
         max_features=max_features,
         prv_featcounts=(
@@ -781,6 +786,7 @@ def make_templates_fix_rounds(
                 slctd_ms=slctd_ms,
                 init_fidx=init_fidx,
                 n_cands_init=n_cands_init,
+                n_cands_targ=None,
                 min_features=min_features,
                 max_features=max_features,
                 use_feature_importance_sampling=use_feature_importance_sampling,
@@ -852,6 +858,7 @@ def make_templates_fix_rounds_nearest_neighbors(
                 slctd_ms=slctd_ms,
                 init_fidx=init_fidx,
                 n_cands_init=n_cands_init,
+                n_cands_targ=None,
                 min_features=min_features,
                 max_features=max_features,
                 use_feature_importance_sampling=use_feature_importance_sampling,
