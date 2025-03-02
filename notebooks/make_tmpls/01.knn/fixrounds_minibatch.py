@@ -47,15 +47,18 @@ def make_templates_fix_rounds_minibatch(
         n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
     ):
         if ctmpls is None or tmpls is None or slctd_ms is None:
-            tclassifier.fit_(
-                _tmplfns.make_template_candidates(
-                    n_covs=n_covs,
-                    init_fidx=init_fidx,
-                    n_cands_targ=max(n_cands_targ, n_cands_targ_minibatch),
-                    min_features=min_features,
-                    max_features=max_features,
+            if isinstance(
+                classifier, mymodels.classifiers.SubsetFeatureConcatClassifier
+            ):
+                classifier.fit_(
+                    _tmplfns.make_template_candidates(
+                        n_covs=n_covs,
+                        init_fidx=init_fidx,
+                        n_cands_targ=max(n_cands_targ, n_cands_targ_minibatch),
+                        min_features=min_features,
+                        max_features=max_features,
+                    )
                 )
-            )
             ctmpls = th.cat(
                 [
                     _tmplfns.make_templates_vanilla(
@@ -96,6 +99,10 @@ def make_templates_fix_rounds_minibatch(
                 )
                 for _ in range(math.ceil(n_cands_targ / n_tmpls_targ))
             ]
+            if isinstance(
+                classifier, mymodels.classifiers.SubsetFeatureConcatClassifier
+            ):
+                classifier.fit_(th.unique(th.cat(_ctmpls_l, dim=0), dim=0))
             ctmpls = th.cat(
                 [
                     _tmplfns.make_templates_from_candidates(
