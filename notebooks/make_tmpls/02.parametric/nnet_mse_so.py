@@ -294,6 +294,7 @@ tmpls: th.Tensor = _tmplfns.make_templates_fix_rounds(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
+    to_update_classifier=True,
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
     n_cands_init=n_cands_targ,
