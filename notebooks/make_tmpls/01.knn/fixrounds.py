@@ -87,9 +87,7 @@ bsz: int = 8192
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join(
-    "outputs", "run", data_name, "fixrounds"
-)
+output_dir: str = os.path.join("outputs", "run", data_name, "fixrounds")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -139,6 +137,8 @@ vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
     ys_train=extdata["ys"].numpy(),
     xgbc_kwargs={"n_estimators": 40},
 )
+
+# %%
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
@@ -152,7 +152,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=10,
             p=2,
         ),
         init_fidx=init_fidx,
@@ -177,11 +177,6 @@ print(pd.Series(metrics_d))
 
 
 # %%
-vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
-    xs_train=extdata["xs"].numpy(),
-    ys_train=extdata["ys"].numpy(),
-    xgbc_kwargs={"n_estimators": 40},
-)
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
@@ -195,7 +190,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=10,
             p=2,
         ),
         init_fidx=init_fidx,
@@ -220,11 +215,6 @@ metrics_d.update(
 print(pd.Series(metrics_d))
 
 # %%
-vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
-    xs_train=extdata["xs"].numpy(),
-    ys_train=extdata["ys"].numpy(),
-    xgbc_kwargs={"n_estimators": 40},
-)
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
@@ -238,7 +228,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=10,
             p=2,
         ),
         init_fidx=init_fidx,

@@ -277,6 +277,8 @@ vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
     ys_train=extdata["ys"].numpy(),
     xgbc_kwargs={"n_estimators": 40},
 )
+
+# %%
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
@@ -290,7 +292,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=10,
             p=2,
         ),
         init_fidx=init_fidx,
@@ -315,11 +317,6 @@ print(pd.Series(metrics_d))
 
 
 # %%
-vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
-    xs_train=extdata["xs"].numpy(),
-    ys_train=extdata["ys"].numpy(),
-    xgbc_kwargs={"n_estimators": 40},
-)
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
@@ -333,7 +330,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=10,
             p=2,
         ),
         init_fidx=init_fidx,
@@ -358,11 +355,6 @@ metrics_d.update(
 print(pd.Series(metrics_d))
 
 # %%
-vclassifier = mymodels.classifiers.SubsetFeatureXGBClassifier(
-    xs_train=extdata["xs"].numpy(),
-    ys_train=extdata["ys"].numpy(),
-    xgbc_kwargs={"n_estimators": 40},
-)
 metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
@@ -376,7 +368,7 @@ for _data in vdata:
             txs=tdata["xs"],
             tcels=tpcomp["cels"],
             tmpls=tmpls,
-            n_neighs=2,
+            n_neighs=10,
             p=2,
         ),
         init_fidx=init_fidx,
