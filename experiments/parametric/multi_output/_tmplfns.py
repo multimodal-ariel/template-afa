@@ -398,6 +398,7 @@ def update_template_candidates_fix_rounds(
     slctd_ms: th.Tensor,
     init_fidx: int,
     n_cands_init: int,
+    n_cands_targ: int | None,
     min_features: int,
     max_features: Optional[int],
     use_feature_importance_sampling: bool,
@@ -406,7 +407,9 @@ def update_template_candidates_fix_rounds(
     fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
         tmpls_prv=tmpls_prv,
         init_fidx=init_fidx,
-        n_cands_targ=2 * len(tmpls_prv),
+        n_cands_targ=min(
+            2 * len(tmpls_prv) if n_cands_targ is None else n_cands_targ, n_cands_init
+        ),
         min_features=min_features,
     )
     n_covs: int = ctmpls.shape[1]
@@ -414,7 +417,9 @@ def update_template_candidates_fix_rounds(
         fcs_set=fcs_set,
         n_covs=n_covs,
         init_fidx=init_fidx,
-        n_cands_targ=min(5 * len(tmpls_prv), n_cands_init),
+        n_cands_targ=min(
+            5 * len(tmpls_prv) if n_cands_targ is None else n_cands_targ, n_cands_init
+        ),
         min_features=min_features,
         max_features=max_features,
         prv_featcounts=(
@@ -613,6 +618,7 @@ def make_templates_vanilla(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    to_update_classifier: bool,
     init_fidx: int,
     n_tmpls: int,
     n_cands: int,
@@ -633,7 +639,10 @@ def make_templates_vanilla(
         min_features=min_features,
         max_features=max_features,
     )
-    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+    if (
+        isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+        and to_update_classifier
+    ):
         classifier.fit_(ctmpls)
     tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
         tmpls=ctmpls,
@@ -653,7 +662,10 @@ def make_templates_vanilla(
         plf=plf,
         log_prefix="vanilla_mktmpl",
     )
-    if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+    if (
+        isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+        and to_update_classifier
+    ):
         classifier.fit_(tmpls)
     return tmpls
 
@@ -663,6 +675,7 @@ def make_templates_reduce_features(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    to_update_classifier: bool,
     init_fidx: int,
     n_tmpls_targ: int,
     n_cands_targ: int,
@@ -714,7 +727,10 @@ def make_templates_reduce_features(
                 max_features=_maxfeats,
                 use_feature_importance_sampling=use_feature_importance_sampling,
             )
-        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
             classifier.fit_(ctmpls)
         tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
             ctmpls,
@@ -734,7 +750,10 @@ def make_templates_reduce_features(
             plf=plf,
             log_prefix=f"reduce_mktmpl{_i}",
         )
-        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
             classifier.fit_(tmpls)
         _i = _i + 1
     assert tmpls is not None
@@ -746,6 +765,7 @@ def make_templates_fix_rounds(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    to_update_classifier: bool,
     init_fidx: int,
     n_tmpls_targ: int,
     n_cands_init: int,
@@ -781,10 +801,150 @@ def make_templates_fix_rounds(
                 slctd_ms=slctd_ms,
                 init_fidx=init_fidx,
                 n_cands_init=n_cands_init,
+                n_cands_targ=None,
                 min_features=min_features,
                 max_features=max_features,
                 use_feature_importance_sampling=use_feature_importance_sampling,
             )
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
+            classifier.fit_(ctmpls)
+        tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
+            ctmpls,
+            data=(
+                tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+                if max_tdata is not None and max_tdata < len(tdata)
+                else tdata
+            ),
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+        )
+        tmpls, slctd_ms = make_templates_from_candidates(
+            tpcomp=tpcomp,
+            ctmpls=ctmpls,
+            n_tmpls=n_tmpls_targ,
+            plf=plf,
+            log_prefix=f"fixrounds_mktmpl{_i}",
+        )
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
+            classifier.fit_(tmpls)
+    assert tmpls is not None
+    return tmpls
+
+
+def make_templates_fix_rounds_minibatch(
+    tdata: thd.TensorDict,
+    max_tdata: Optional[int],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    n_tmpls_targ: int,
+    n_cands_targ: int,
+    n_cands_targ_minibatch: int,
+    min_features: int,
+    max_features: Optional[int],
+    n_rounds: int,
+    use_feature_importance_sampling: bool,
+    lmbda: float,
+    bsz: int,
+    minibatch_size: int,
+    plf: pl.Fabric,
+) -> th.Tensor:
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    ctmpls: th.Tensor | None = None
+    tmpls: th.Tensor | None = None
+    slctd_ms: th.Tensor | None = None
+    for _i in tqdm.trange(
+        n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
+    ):
+        if ctmpls is None or tmpls is None or slctd_ms is None:
+            if isinstance(
+                classifier, mymodels.classifiers.SubsetFeatureConcatClassifier
+            ):
+                classifier.fit_(
+                    make_template_candidates(
+                        n_covs=n_covs,
+                        init_fidx=init_fidx,
+                        n_cands_targ=max(n_cands_targ, n_cands_targ_minibatch),
+                        min_features=min_features,
+                        max_features=max_features,
+                    )
+                )
+            ctmpls = th.cat(
+                [
+                    make_templates_vanilla(
+                        tdata=tdata[
+                            th.multinomial(
+                                th.ones((len(tdata),)), num_samples=minibatch_size
+                            )
+                        ],
+                        max_tdata=None,
+                        classifier=classifier,
+                        to_update_classifier=False,
+                        init_fidx=init_fidx,
+                        n_tmpls=n_tmpls_targ,
+                        n_cands=n_cands_targ_minibatch,
+                        min_features=min_features,
+                        max_features=max_features,
+                        lmbda=lmbda,
+                        bsz=bsz,
+                        plf=plf,
+                    )
+                    for _ in range(math.ceil(n_cands_targ / n_tmpls_targ))
+                ],
+                dim=0,
+            )
+        else:
+            _ctmpls_prv: th.Tensor = ctmpls
+            # update candidate pool from existing templates
+            _ctmpls_l: list[th.Tensor] = [
+                update_template_candidates_fix_rounds(
+                    ctmpls=_ctmpls_prv,
+                    slctd_ms=slctd_ms,
+                    init_fidx=init_fidx,
+                    n_cands_init=n_cands_targ_minibatch,
+                    n_cands_targ=None,
+                    min_features=min_features,
+                    max_features=max_features,
+                    use_feature_importance_sampling=use_feature_importance_sampling,
+                )
+                for _ in range(math.ceil(n_cands_targ / n_tmpls_targ))
+            ]
+            if isinstance(
+                classifier, mymodels.classifiers.SubsetFeatureConcatClassifier
+            ):
+                classifier.fit_(th.unique(th.cat(_ctmpls_l, dim=0), dim=0))
+            ctmpls = th.cat(
+                [
+                    make_templates_from_candidates(
+                        tpcomp=precomp_rwds_for_tmpls(
+                            tmpls=_ctmpls,
+                            data=tdata[
+                                th.multinomial(
+                                    th.ones((len(tdata),)), num_samples=minibatch_size
+                                )
+                            ],
+                            classifier=classifier,
+                            lmbda=lmbda,
+                            bsz=bsz,
+                        ),
+                        ctmpls=_ctmpls,
+                        n_tmpls=n_tmpls_targ,
+                        plf=plf,
+                        log_prefix=f"round{_i}_minibatch{_j}",
+                    )[0]
+                    for _j, _ctmpls in enumerate(_ctmpls_l)
+                ],
+                dim=0,
+            )
+        ctmpls = th.unique(ctmpls, dim=0)
+        assert ctmpls is not None
         if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
             classifier.fit_(ctmpls)
         tpcomp: thd.TensorDict = precomp_rwds_for_tmpls(
@@ -816,6 +976,7 @@ def make_templates_fix_rounds_nearest_neighbors(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    to_update_classifier: bool,
     init_fidx: int,
     n_tmpls_targ: int,
     n_cands_init: int,
@@ -852,11 +1013,15 @@ def make_templates_fix_rounds_nearest_neighbors(
                 slctd_ms=slctd_ms,
                 init_fidx=init_fidx,
                 n_cands_init=n_cands_init,
+                n_cands_targ=None,
                 min_features=min_features,
                 max_features=max_features,
                 use_feature_importance_sampling=use_feature_importance_sampling,
             )
-        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
             classifier.fit_(ctmpls)
         _tdata = (
             tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
@@ -896,7 +1061,10 @@ def make_templates_fix_rounds_nearest_neighbors(
             plf=plf,
             log_prefix=f"fixrounds_mktmpl{_i}_knn",
         )
-        if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
             classifier.fit_(tmpls)
     assert tmpls is not None
     return tmpls
