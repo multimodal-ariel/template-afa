@@ -92,7 +92,7 @@ def make_templates_fix_rounds_minibatch(
                     slctd_ms=slctd_ms,
                     init_fidx=init_fidx,
                     n_cands_init=n_cands_targ_minibatch,
-                    n_cands_targ=n_cands_targ_minibatch,
+                    n_cands_targ=None,
                     min_features=min_features,
                     max_features=max_features,
                     use_feature_importance_sampling=use_feature_importance_sampling,
