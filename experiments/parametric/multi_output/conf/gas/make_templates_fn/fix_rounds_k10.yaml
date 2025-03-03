@@ -7,4 +7,3 @@ max_features: null
 n_rounds: 5
 use_feature_importance_sampling: true
 n_neighs: 10
-to_update_classifier: true

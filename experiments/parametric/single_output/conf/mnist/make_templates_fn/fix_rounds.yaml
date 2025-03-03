@@ -6,4 +6,3 @@ min_features: 1
 max_features: null
 n_rounds: 10
 use_feature_importance_sampling: true
-to_update_classifier: true
