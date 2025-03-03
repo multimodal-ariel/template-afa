@@ -13,6 +13,7 @@ pygraphviz
 pyvis
 scikit-learn
 scikit-image
+imbalanced-learn
 interpret
 xgboost
 torch
