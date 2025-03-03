@@ -29,7 +29,7 @@ opt:
   _target_: torch.optim.Adam
   lr: 1e-4
 nnet_tcfg:
-  n_fit_iter: 5_000
+  n_fit_iter: 1_000
   bsz: 1024
 # make_templates_fn:
 #   TODO override this
