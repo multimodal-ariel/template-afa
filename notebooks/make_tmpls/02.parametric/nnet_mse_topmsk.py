@@ -274,7 +274,7 @@ bsz: int = 8192
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "nnet_mse")
+output_dir: str = os.path.join("outputs", "run", data_name, "nnet_mse_topmsk")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
