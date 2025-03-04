@@ -83,6 +83,7 @@ def _make_fit_bsinps(
     tmpls: th.Tensor,
     fmsk_w_topk_tmpl: int,
 ) -> th.Tensor:
+    device: th.device = bstdata["xs"].device
     bsz: int = len(bstdata)
     n_covs: int = tmpls.shape[1]
     brwds: th.Tensor = bstdata["rwds"]
@@ -93,7 +94,7 @@ def _make_fit_bsinps(
     ]
     # (bsz, fmsk_w_topk_tmpl, n_covs)
     btop_tmpls: th.Tensor = th.gather(
-        tmpls[None, :, :].expand(bsz, -1, -1),
+        tmpls[None, :, :].expand(bsz, -1, -1).to(device=device),
         dim=1,
         index=top_tmpl_idxs[:, :, None].expand(-1, -1, n_covs),
     )
@@ -102,6 +103,7 @@ def _make_fit_bsinps(
     btmpls: th.Tensor = th.clamp(th.sum(btop_tmpls, dim=1), 0.0, 1.0)
     bnms: th.Tensor = btmpls * th.randint_like(btmpls, 0, 2)
     bnms[:, init_fidx] = 1
+    # make selector inputs
     bxs: th.Tensor = bstdata["xs"]
     # (bsz, 2 * n_covs)
     bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
@@ -338,8 +340,8 @@ fit(
     init_fidx=init_fidx,
     tmpls=tmpls,
     fmsk_w_topk_tmpl=fmsk_w_topk_tmpl,
-    n_iter=100_000,
-    bsz=512,
+    n_iter=5_000,
+    bsz=1024,
     plf=plf_nnet,
 )
 
