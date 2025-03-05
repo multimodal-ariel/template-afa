@@ -92,10 +92,13 @@ def main(cfg: MainConf):
         bsz=cfg.bsz,
         plf=plf,
     )
+    th.save(_tdata_shuffle_idxs, os.path.join(output_dir, "tdata_shuffle_idxs.pt"))
+    th.save(tmpls, os.path.join(output_dir, "tmpls.pt"))
     # evaluate validation set performance
     tpcomp: thd.TensorDict = _tmplfns.precomp_rwds_for_tmpls(
         tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=cfg.lmbda, bsz=cfg.bsz
     )
+    th.save(tpcomp, os.path.join(output_dir, "tpcomp.pt"))
     metrics_d: dict[str, float] = _tmplfns.evaluate(
         data=vdata,
         classifier=vclassifier,
