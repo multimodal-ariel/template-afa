@@ -25,7 +25,7 @@ vclassifier:
 # make_templates_fn:
 #   TODO override this
 #   _target_: ...
-init_fidx: 31
+init_fidx: 35
 lmbda: 0.075
 n_neighs: 10
 bsz: 1024
