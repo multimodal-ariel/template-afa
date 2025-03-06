@@ -24,7 +24,8 @@ PROJ_ROOT: str = "../../"
 
 # %%
 # mktmpl_run_dir: str = "experiments/make_template/outputs/grid/20250305_145621/2"
-mktmpl_run_dir: str = "experiments/make_template/outputs/cube/20250305_143844/4"
+# mktmpl_run_dir: str = "experiments/make_template/outputs/cube/20250305_143844/4"
+mktmpl_run_dir: str = "experiments/make_template/outputs/big5/20250305_145410/2"
 
 # %%
 _tdata_shuffle_idxs: th.Tensor = th.load(
@@ -269,6 +270,20 @@ def _tmplafa_predict(
     return pyhats, oms, fms
 
 
+@th.no_grad()
+def _make_dagger_fit_bsinps(
+    bstdata: thd.TensorDict, boms: th.Tensor, init_fidx: int
+) -> th.Tensor:
+    # (bsz, n_covs)
+    bxs: th.Tensor = bstdata["xs"]
+    # randomly drop features
+    bnms: th.Tensor = boms * th.randint_like(boms, 0, 2)
+    bnms[:, init_fidx] = 1
+    # (bsz, 2 * n_covs)
+    bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
+    return bsinps
+
+
 def dagger_fit_xgb_reward_est(
     regressor: BootstrapXGBRegressor,
     n_data_per_split: int,
@@ -282,26 +297,29 @@ def dagger_fit_xgb_reward_est(
     pbar = tqdm.tqdm(
         regressor._models, desc="dagger fit", leave=False, dynamic_ncols=True
     )
+    # (n_data, n_covs)
+    _, oms, _ = _tmplafa_predict(
+        data=stdata,
+        classifier=classifier,
+        cost_est=lambda x: bootstrap_xgb_regressor_cost_est(
+            x,
+            lmbda=lmbda,
+            tmpls=tmpls,
+            regressor=regressor,
+        ),
+        init_fidx=init_fidx,
+        tmpls=tmpls,
+        plf=plf,
+    )
     for m in pbar:
+        bidxs: th.Tensor = th.randint(0, len(stdata), (n_data_per_split,))
         bstdata: thd.TensorDict = stdata[
             th.randint(0, len(stdata), (n_data_per_split,))
         ]
-        # (n_data_per_split, n_covs)
-        _, boms, _ = _tmplafa_predict(
-            data=bstdata,
-            classifier=classifier,
-            cost_est=lambda x: bootstrap_xgb_regressor_cost_est(
-                x,
-                lmbda=lmbda,
-                tmpls=tmpls,
-                regressor=regressor,
-            ),
-            init_fidx=init_fidx,
-            tmpls=tmpls,
-            plf=plf,
-        )
         # (n_data_per_split, 2 * n_covs)
-        bsinps: th.Tensor = th.cat((bstdata["xs"].to(device=plf.device), boms), dim=1)
+        bsinps: th.Tensor = _make_dagger_fit_bsinps(
+            bstdata=stdata[bidxs], boms=oms[bidxs], init_fidx=init_fidx
+        )
         # (n_data_per_split, n_tmpls)
         bstargs: th.Tensor = bstdata["cels"]
         m.fit(
@@ -345,6 +363,27 @@ metrics_func.reset()
 metrics_d: dict[str, float] = _tmplfns.evaluate(
     data=vdata,
     classifier=vclassifier,
+    cost_est=lambda x: _tmplfns.knn_cost_est(
+        x,
+        lmbda=cfg.lmbda,
+        txs=tdata["xs"],
+        tcels=tpcomp["cels"],
+        tmpls=tmpls,
+        n_neighs=cfg.n_neighs,
+        p=2,
+    ),
+    init_fidx=cfg.init_fidx,
+    tmpls=tmpls,
+    metrics_func=metrics_func,
+    plf=plf,
+)
+print(pd.Series(metrics_d))
+
+# %%
+metrics_func.reset()
+metrics_d: dict[str, float] = _tmplfns.evaluate(
+    data=vdata,
+    classifier=vclassifier,
     cost_est=lambda x: bootstrap_xgb_regressor_cost_est(
         x, lmbda=cfg.lmbda, tmpls=tmpls, regressor=regressor
     ),
@@ -366,5 +405,20 @@ dagger_fit_xgb_reward_est(
     tmpls=tmpls,
     plf=plf,
 )
+
+# %%
+metrics_func.reset()
+metrics_d: dict[str, float] = _tmplfns.evaluate(
+    data=vdata,
+    classifier=vclassifier,
+    cost_est=lambda x: bootstrap_xgb_regressor_cost_est(
+        x, lmbda=cfg.lmbda, tmpls=tmpls, regressor=regressor
+    ),
+    init_fidx=cfg.init_fidx,
+    tmpls=tmpls,
+    metrics_func=metrics_func,
+    plf=plf,
+)
+print(pd.Series(metrics_d))
 
 # %%
