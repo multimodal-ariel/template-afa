@@ -57,6 +57,8 @@ extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
 tclassifier: mymodels.classifiers.SubsetFeatureClassifier = hd.utils.instantiate(
     cfg.tclassifier, xs_train=extdata["xs"].numpy(), ys_train=extdata["ys"].numpy()
 )
+if isinstance(tclassifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+    tclassifier.fit_(tmpls)
 vclassifier: mymodels.classifiers.SubsetFeatureClassifier = tclassifier
 if cfg.vclassifier is not None:
     vclassifier = hd.utils.instantiate(
@@ -313,7 +315,7 @@ def dagger_fit_xgb_reward_est(
 stdata: thd.TensorDict = compile_selector_dataset(tdata=tdata, tpcomp=tpcomp)
 
 # %%
-regressor = BootstrapXGBRegressor({"n_estimators": 40}, n_splits=64)
+regressor = BootstrapXGBRegressor({"n_estimators": 40}, n_splits=5)
 
 # %%
 warmup_fit_xgb_regressor(
@@ -354,5 +356,15 @@ metrics_d: dict[str, float] = _tmplfns.evaluate(
 print(pd.Series(metrics_d))
 
 # %%
+dagger_fit_xgb_reward_est(
+    regressor,
+    n_data_per_split=5 * len(stdata),
+    stdata=stdata,
+    classifier=tclassifier,
+    init_fidx=cfg.init_fidx,
+    lmbda=cfg.lmbda,
+    tmpls=tmpls,
+    plf=plf,
+)
 
 # %%
