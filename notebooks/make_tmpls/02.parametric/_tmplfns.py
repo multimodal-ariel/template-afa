@@ -1160,6 +1160,7 @@ def run_one_episode(
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
     if isinstance(cost_est, th.nn.Module):
         cost_est.eval().to(device=plf.device)
+    tmpls = tmpls.to(plf.device)
     fobsd_l: list[int] = [init_fidx]
     fcomb: tuple[int, ...] | None = None
     for _ in itrtls.count():
@@ -1170,9 +1171,11 @@ def run_one_episode(
         # (1, 2 * n_covs)
         _inps: th.Tensor = th.cat((x * _fm, _fm))[None, :]
         # (1, n_tmpls)
-        _costs: th.Tensor = cost_est(_inps.to(device=plf.device)).to(device="cpu")
+        _costs: th.Tensor = cost_est(_inps.to(device=plf.device))
         _tmpl_idx: int = int(th.argmin(_costs[0]).item())
-        _fm_avail: th.Tensor = th.maximum(tmpls[_tmpl_idx] - _fm, th.as_tensor(0.0))
+        _fm_avail: th.Tensor = th.maximum(
+            tmpls[_tmpl_idx] - _fm, th.as_tensor(0.0, device=plf.device)
+        )
         if th.sum(_fm_avail) == 0:
             fcomb = tuple(th.argwhere(tmpls[_tmpl_idx] == 1).flatten().tolist())
             break
