@@ -19,7 +19,7 @@ import tqdm.auto as tqdm
 from omegaconf import OmegaConf
 
 # %%
-PROJ_ROOT: str = "../../"
+PROJ_ROOT: str = "../../../"
 
 # %%
 # mktmpl_run_dir: str = "experiments/make_template/outputs/grid/20250305_145621/2"
@@ -391,7 +391,7 @@ dagger_fit_nnet_regressor(
     lmbda=cfg.lmbda,
     tmpls=tmpls,
     n_iter=100,
-    bsz=32,
+    bsz=1024,
     plf=plf_nnet,
 )
 
