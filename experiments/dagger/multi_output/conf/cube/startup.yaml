@@ -25,7 +25,7 @@ warmup_nnet_tcfg:
 dagger_nnet_tcfg:
   n_fit_iter: 100_000
   bsz: 32
-  eval_ckpt_every_n_iter: 100
+  eval_every_n_iter: 100
   save_ckpt_every_n_iter: 1000
 plf:
   _target_: lightning.Fabric
