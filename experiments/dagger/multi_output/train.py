@@ -12,10 +12,8 @@ import mylib.utils
 import mymodels.classifiers
 import mymodels.nn
 import mymodels.protocols
-import pandas as pd
 import tensordict as thd
 import torch as th
-import torch.utils.data as th_data
 import torchmetrics as thm
 import tqdm.auto as tqdm
 from hydra.core.hydra_config import HydraConfig
@@ -382,7 +380,7 @@ def dagger_fit_nnet_regressor(
                 plf=plf,
             )
             plf.log_dict(
-                mylib.utils.add_prefix_to_dict(vmetrics_d, "eval_dagger"),
+                mylib.utils.add_prefix_to_dict(vmetrics_d, "train_dagger"),
                 step=tstate["opt_step"],
             )
     pbar.close()
@@ -412,6 +410,7 @@ def main(cfg: MainConf):
     mktmpl_cfg = OmegaConf.load(
         os.path.join(PROJ_ROOT, mktmpl_run_dir, ".hydra", "config.yaml")
     )
+    OmegaConf.save(mktmpl_cfg, os.path.join(output_dir, ".hydra", "mktmpl_config.yaml"))
     # make dataset
     _tdata: thd.TensorDict
     vdata: thd.TensorDict
@@ -433,6 +432,8 @@ def main(cfg: MainConf):
         xs_train=extdata["xs"].numpy(),
         ys_train=extdata["ys"].numpy(),
     )
+    if isinstance(tclassifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+        tclassifier.fit_(tmpls)
     vclassifier: mymodels.classifiers.SubsetFeatureClassifier = tclassifier
     if mktmpl_cfg.vclassifier is not None:
         vclassifier = hd.utils.instantiate(
@@ -440,7 +441,8 @@ def main(cfg: MainConf):
             xs_train=extdata["xs"].numpy(),
             ys_train=extdata["ys"].numpy(),
         )
-    # configure logger and ckpt path
+        if isinstance(vclassifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
+            vclassifier.fit_(tmpls)  # configure logger and ckpt path
     os.makedirs(output_dir, exist_ok=True)
     tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
     csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
