@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Callable, TypedDict
+from typing import Callable, Optional, TypedDict
 
 import _tmplfns
 import hydra as hd
@@ -152,6 +152,38 @@ class _TrainState(TypedDict):
     opt_step: int
 
 
+def _warmup_fit_iter_nnet_regressor(
+    tstate: _TrainState,
+    bstdata: thd.TensorDict,
+    init_fidx: int,
+    tmpls: th.Tensor,
+    plf: pl.Fabric,
+) -> dict[str, float]:
+    nnet: th.nn.Module = tstate["nnet"].train().to(device=plf.device)
+    opt: th.optim.Optimizer = tstate["opt"]
+    # (bsz, 2 * n_covs)
+    bsinps: th.Tensor = _make_warmup_fit_bsinps(
+        bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
+    )
+    # (bsz, n_tmpls)
+    bsouts: th.Tensor = nnet(bsinps)
+    # compute selector loss
+    bslosses: th.Tensor = th.nn.functional.mse_loss(
+        bsouts, bstdata["cels"], reduction="none"
+    )
+    bsloss: th.Tensor = th.mean(bslosses)
+    # update selector parameter
+    opt.zero_grad()
+    bsloss.backward()
+    opt.step()
+    # track metrics
+    bmetrics_d: dict[str, float] = {
+        "bsloss": bsloss.item(),
+    }
+    tstate["opt_step"] = tstate["opt_step"] + 1
+    return bmetrics_d
+
+
 def warmup_fit_nnet_regressor(
     tstate: _TrainState,
     stdata: thd.TensorDict,
@@ -160,39 +192,29 @@ def warmup_fit_nnet_regressor(
     n_iter: int,
     bsz: int,
     plf: pl.Fabric,
+    ckpt_p: Optional[str] = None,
+    save_ckpt_every_n_iter: int = 1,
 ):
-    nnet: th.nn.Module = tstate["nnet"].train().to(device=plf.device)
-    opt: th.optim.Optimizer = tstate["opt"]
     pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
-    for _ in pbar:
+    for _itr in pbar:
         bstdata: thd.TensorDict = stdata[th.randint(0, len(stdata), (bsz,))].to(
             device=plf.device
         )
-        # (bsz, 2 * n_covs)
-        bsinps: th.Tensor = _make_warmup_fit_bsinps(
-            bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
-        )
-        # (bsz, n_tmpls)
-        bsouts: th.Tensor = nnet(bsinps)
-        # compute selector loss
-        bslosses: th.Tensor = th.nn.functional.mse_loss(
-            bsouts, bstdata["cels"], reduction="none"
-        )
-        bsloss: th.Tensor = th.mean(bslosses)
-        # update selector parameter
-        opt.zero_grad()
-        bsloss.backward()
-        opt.step()
         # track metrics
-        bmetrics_d: dict[str, float] = {
-            "bsloss": bsloss.item(),
-        }
+        bmetrics_d: dict[str, float] = _warmup_fit_iter_nnet_regressor(
+            tstate=tstate, bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls, plf=plf
+        )
         pbar.set_postfix(bmetrics_d)
         plf.log_dict(
-            mylib.utils.add_prefix_to_dict(bmetrics_d, "train"), step=tstate["opt_step"]
+            mylib.utils.add_prefix_to_dict(bmetrics_d, "train_warmup"),
+            step=tstate["opt_step"],
         )
-        tstate["opt_step"] = tstate["opt_step"] + 1
+        if ckpt_p is not None and (
+            (_itr % save_ckpt_every_n_iter) == 0 or (_itr + 1) == n_iter
+        ):
+            plf.save(os.path.join(ckpt_p, f"warmup_itr{_itr}.pt"), tstate)
     pbar.close()
+    return tstate
 
 
 # %%
@@ -291,6 +313,72 @@ def _make_dagger_fit_bsinps(
     return bsinps_l
 
 
+def _dagger_fit_iter_nnet_regressor(
+    tstate: _TrainState,
+    bstdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    lmbda: float,
+    tmpls: th.Tensor,
+    plf: pl.Fabric,
+) -> dict[str, float]:
+    nnet: th.nn.Module = tstate["nnet"].to(device=plf.device)
+    opt: th.optim.Optimizer = tstate["opt"]
+    nnet.eval()
+    _, _, _, bfobsds_l = _tmplafa_predict(
+        data=bstdata,
+        classifier=classifier,
+        cost_est=lambda x: nnet_cost_est(
+            x, nnet=nnet, lmbda=lmbda, tmpls=tmpls, device=plf.device
+        ),
+        init_fidx=init_fidx,
+        tmpls=tmpls,
+        plf=plf,
+    )
+    nnet.train()
+    # shape of list (bsz, )
+    # shape of tensor in the list (len(boms[_bi]), 2 * n_covs)
+    bsinps_l: list[th.Tensor] = _make_dagger_fit_bsinps(
+        bstdata=bstdata, bfobsds_l=bfobsds_l, init_fidx=init_fidx
+    )
+    # # one experience for each datum from the batch
+    # # (bsz, 2 * n_covs)
+    # bsinps: th.Tensor = th.stack(
+    #     [sinps[th.randint(0, len(sinps), ())] for sinps in bsinps_l], dim=0
+    # )
+    # # (bsz, n_tmpls)
+    # bsouts: th.Tensor = nnet(bsinps)
+    # # compute selector loss
+    # # (bsz, )
+    # bslosses: th.Tensor = th.nn.functional.mse_loss(
+    #     bsouts, bstdata["cels"], reduction="none"
+    # )
+    # concatenate all experiences from all data
+    # (sum(map(len, bsinps_l)), 2 * n_covs)
+    bsinps: th.Tensor = th.cat(bsinps_l, dim=0)
+    # (sum(map(len, bsinps_l)), n_tmpls)
+    bsouts: th.Tensor = nnet(bsinps)
+    # compute selector loss
+    # (sum(map(len, bsinps_l)), )
+    bstargs: th.Tensor = th.repeat_interleave(
+        bstdata["cels"],
+        th.tensor([len(sinps) for sinps in bsinps_l], device=plf.device),
+        dim=0,
+    )
+    bslosses: th.Tensor = th.nn.functional.mse_loss(bsouts, bstargs, reduction="none")
+    bsloss: th.Tensor = th.mean(bslosses)
+    # update selector parameter
+    opt.zero_grad()
+    bsloss.backward()
+    opt.step()
+    # track metrics
+    bmetrics_d: dict[str, float] = {
+        "bsloss": bsloss.item(),
+    }
+    tstate["opt_step"] = tstate["opt_step"] + 1
+    return bmetrics_d
+
+
 def dagger_fit_nnet_regressor(
     tstate: _TrainState,
     stdata: thd.TensorDict,
@@ -300,72 +388,63 @@ def dagger_fit_nnet_regressor(
     tmpls: th.Tensor,
     n_iter: int,
     bsz: int,
+    metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
+    vdata: Optional[thd.TensorDict] = None,
+    vclassifier: Optional[mymodels.classifiers.SubsetFeatureClassifier] = None,
+    eval_every_n_iter: int = 1,
+    ckpt_p: Optional[str] = None,
+    save_ckpt_every_n_iter: int = 1,
 ):
-    nnet: th.nn.Module = tstate["nnet"].train().to(device=plf.device)
-    opt: th.optim.Optimizer = tstate["opt"]
     pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
-    for _ in pbar:
+    for _itr in pbar:
         bstdata: thd.TensorDict = stdata[th.randint(0, len(stdata), (bsz,))].to(
             device=plf.device
         )
-        _, boms, _, bfobsds_l = _tmplafa_predict(
-            data=bstdata,
+        # track metrics
+        btmetrics_d: dict[str, float] = _dagger_fit_iter_nnet_regressor(
+            tstate=tstate,
+            bstdata=bstdata,
             classifier=classifier,
-            cost_est=lambda x: nnet_cost_est(
-                x, nnet=nnet, lmbda=lmbda, tmpls=tmpls, device=plf.device
-            ),
             init_fidx=init_fidx,
+            lmbda=lmbda,
             tmpls=tmpls,
             plf=plf,
         )
-        # shape of list (bsz, )
-        # shape of tensor in the list (len(boms[_bi]), 2 * n_covs)
-        bsinps_l: list[th.Tensor] = _make_dagger_fit_bsinps(
-            bstdata=bstdata, bfobsds_l=bfobsds_l, init_fidx=init_fidx
-        )
-        # # one experience for each datum from the batch
-        # # (bsz, 2 * n_covs)
-        # bsinps: th.Tensor = th.stack(
-        #     [sinps[th.randint(0, len(sinps), ())] for sinps in bsinps_l], dim=0
-        # )
-        # # (bsz, n_tmpls)
-        # bsouts: th.Tensor = nnet(bsinps)
-        # # compute selector loss
-        # # (bsz, )
-        # bslosses: th.Tensor = th.nn.functional.mse_loss(
-        #     bsouts, bstdata["cels"], reduction="none"
-        # )
-        # concatenate all experiences from all data
-        # (sum(map(len, bsinps_l)), 2 * n_covs)
-        bsinps: th.Tensor = th.cat(bsinps_l, dim=0)
-        # (sum(map(len, bsinps_l)), n_tmpls)
-        bsouts: th.Tensor = nnet(bsinps)
-        # compute selector loss
-        # (sum(map(len, bsinps_l)), )
-        bstargs: th.Tensor = th.repeat_interleave(
-            bstdata["cels"],
-            th.tensor([len(sinps) for sinps in bsinps_l], device=plf.device),
-            dim=0,
-        )
-        bslosses: th.Tensor = th.nn.functional.mse_loss(
-            bsouts, bstargs, reduction="none"
-        )
-        bsloss: th.Tensor = th.mean(bslosses)
-        # update selector parameter
-        opt.zero_grad()
-        bsloss.backward()
-        opt.step()
-        # track metrics
-        bmetrics_d: dict[str, float] = {
-            "bsloss": bsloss.item(),
-        }
-        pbar.set_postfix(bmetrics_d)
+        pbar.set_postfix(btmetrics_d)
         plf.log_dict(
-            mylib.utils.add_prefix_to_dict(bmetrics_d, "train"), step=tstate["opt_step"]
+            mylib.utils.add_prefix_to_dict(btmetrics_d, "train_dagger"),
+            step=tstate["opt_step"],
         )
-        tstate["opt_step"] = tstate["opt_step"] + 1
+        if ckpt_p is not None and (
+            (_itr % save_ckpt_every_n_iter) == 0 or (_itr + 1) == n_iter
+        ):
+            plf.save(os.path.join(ckpt_p, f"dagger_itr{_itr}.pt"), tstate)
+        if vdata is not None and (
+            _itr % eval_every_n_iter == 0 or (_itr + 1) == n_iter
+        ):
+            vclassifier = classifier if vclassifier is None else vclassifier
+            vmetrics_d: dict[str, float] = _tmplfns.evaluate(
+                data=vdata,
+                classifier=vclassifier,
+                cost_est=lambda x: nnet_cost_est(
+                    x,
+                    nnet=tstate["nnet"],
+                    lmbda=lmbda,
+                    tmpls=tmpls,
+                    device=plf.device,
+                ),
+                init_fidx=init_fidx,
+                tmpls=tmpls,
+                metrics_func=metrics_func,
+                plf=plf,
+            )
+            plf.log_dict(
+                mylib.utils.add_prefix_to_dict(vmetrics_d, "eval_dagger"),
+                step=tstate["opt_step"],
+            )
     pbar.close()
+    return tstate
 
 
 # %%
@@ -468,7 +547,12 @@ dagger_fit_nnet_regressor(
     tmpls=tmpls,
     n_iter=100,
     bsz=1024,
+    metrics_func=metrics_func,
     plf=plf_nnet,
+    vdata=vdata,
+    vclassifier=vclassifier,
+    eval_every_n_iter=10,
+    ckpt_p=None,
 )
 
 # %%
