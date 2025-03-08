@@ -1,6 +1,6 @@
 import setuptools
 
 setuptools.setup(
-    name="mylib",
-    package_dir={"": ".",},
+    name="internal",
+    package_dir={"": "."},
 )
