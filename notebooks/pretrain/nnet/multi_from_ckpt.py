@@ -196,6 +196,47 @@ def warmup_fit_nnet_regressor(
 
 
 # %%
+# def _tmplafa_predict(
+#     data: thd.TensorDict,
+#     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+#     cost_est: Callable[[th.Tensor], th.Tensor],
+#     init_fidx: int,
+#     tmpls: th.Tensor,
+#     plf: pl.Fabric,
+# ) -> tuple[th.Tensor, th.Tensor, th.Tensor]:
+#     n_labels: int = classifier.n_labels
+#     pyhats: th.Tensor = th.empty((len(data), n_labels), dtype=th.float32)
+#     oms: th.Tensor = th.zeros_like(data["xs"])
+#     fms: th.Tensor = th.zeros_like(data["xs"])
+#     for _i, _data in enumerate(data):
+#         _pyhat, _fobsd_l, _fcomb = _tmplfns.run_one_episode(
+#             x=_data["xs"],
+#             classifier=classifier,
+#             cost_est=cost_est,
+#             init_fidx=init_fidx,
+#             tmpls=tmpls,
+#             plf=plf,
+#         )
+#         pyhats[_i] = _pyhat
+#         oms[_i, _fcomb] = 1
+#         fms[_i, _fobsd_l] = 1
+#     return pyhats, oms, fms
+
+
+# @th.no_grad()
+# def _make_dagger_fit_bsinps(
+#     bstdata: thd.TensorDict, boms: th.Tensor, init_fidx: int
+# ) -> th.Tensor:
+#     # (bsz, n_covs)
+#     bxs: th.Tensor = bstdata["xs"]
+#     # randomly drop features
+#     bnms: th.Tensor = boms * th.randint_like(boms, 0, 2)
+#     bnms[:, init_fidx] = 1
+#     # (bsz, 2 * n_covs)
+#     bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
+#     return bsinps
+
+
 def _tmplafa_predict(
     data: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -203,11 +244,12 @@ def _tmplafa_predict(
     init_fidx: int,
     tmpls: th.Tensor,
     plf: pl.Fabric,
-) -> tuple[th.Tensor, th.Tensor, th.Tensor]:
+) -> tuple[th.Tensor, th.Tensor, th.Tensor, list[list[int]]]:
     n_labels: int = classifier.n_labels
     pyhats: th.Tensor = th.empty((len(data), n_labels), dtype=th.float32)
     oms: th.Tensor = th.zeros_like(data["xs"])
     fms: th.Tensor = th.zeros_like(data["xs"])
+    fobsds_l: list[list[int]] = list()
     for _i, _data in enumerate(data):
         _pyhat, _fobsd_l, _fcomb = _tmplfns.run_one_episode(
             x=_data["xs"],
@@ -220,21 +262,33 @@ def _tmplafa_predict(
         pyhats[_i] = _pyhat
         oms[_i, _fcomb] = 1
         fms[_i, _fobsd_l] = 1
-    return pyhats, oms, fms
+        fobsds_l.append(_fobsd_l)
+    return pyhats, oms, fms, fobsds_l
 
 
 @th.no_grad()
 def _make_dagger_fit_bsinps(
-    bstdata: thd.TensorDict, boms: th.Tensor, init_fidx: int
-) -> th.Tensor:
+    bstdata: thd.TensorDict, bfobsds_l: list[list[int]], init_fidx: int
+) -> list[th.Tensor]:
     # (bsz, n_covs)
     bxs: th.Tensor = bstdata["xs"]
-    # randomly drop features
-    bnms: th.Tensor = boms * th.randint_like(boms, 0, 2)
-    bnms[:, init_fidx] = 1
-    # (bsz, 2 * n_covs)
-    bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
-    return bsinps
+    # make new masks
+    bnms_l: list[th.Tensor] = list()
+    for _bidx, _fobsd_l in enumerate(bfobsds_l):
+        assert _fobsd_l[0] == init_fidx
+        _nms_l: list[th.Tensor] = list()
+        for _i in range(len(_fobsd_l)):
+            _nm: th.Tensor = th.zeros_like(bxs[_bidx])
+            _nm[_fobsd_l[: _i + 1]] = 1
+            _nms_l.append(_nm)
+        bnms_l.append(th.stack(_nms_l))
+    # make new selector inputs
+    bsinps_l: list[th.Tensor] = list()
+    for _bidx, _nm in enumerate(bnms_l):
+        _xs: th.Tensor = bxs[_bidx][None, :].expand(len(_nm), -1)
+        _sinps: th.Tensor = th.cat((_xs * _nm, _nm), dim=1)
+        bsinps_l.append(_sinps)
+    return bsinps_l
 
 
 def dagger_fit_nnet_regressor(
@@ -255,7 +309,7 @@ def dagger_fit_nnet_regressor(
         bstdata: thd.TensorDict = stdata[th.randint(0, len(stdata), (bsz,))].to(
             device=plf.device
         )
-        _, boms, _ = _tmplafa_predict(
+        _, boms, _, bfobsds_l = _tmplafa_predict(
             data=bstdata,
             classifier=classifier,
             cost_est=lambda x: nnet_cost_est(
@@ -265,15 +319,37 @@ def dagger_fit_nnet_regressor(
             tmpls=tmpls,
             plf=plf,
         )
-        # (bsz, 2 * n_covs)
-        bsinps: th.Tensor = _make_dagger_fit_bsinps(
-            bstdata=bstdata, boms=boms, init_fidx=init_fidx
+        # shape of list (bsz, )
+        # shape of tensor in the list (len(boms[_bi]), 2 * n_covs)
+        bsinps_l: list[th.Tensor] = _make_dagger_fit_bsinps(
+            bstdata=bstdata, bfobsds_l=bfobsds_l, init_fidx=init_fidx
         )
-        # (bsz, n_tmpls)
+        # # one experience for each datum from the batch
+        # # (bsz, 2 * n_covs)
+        # bsinps: th.Tensor = th.stack(
+        #     [sinps[th.randint(0, len(sinps), ())] for sinps in bsinps_l], dim=0
+        # )
+        # # (bsz, n_tmpls)
+        # bsouts: th.Tensor = nnet(bsinps)
+        # # compute selector loss
+        # # (bsz, )
+        # bslosses: th.Tensor = th.nn.functional.mse_loss(
+        #     bsouts, bstdata["cels"], reduction="none"
+        # )
+        # concatenate all experiences from all data
+        # (sum(map(len, bsinps_l)), 2 * n_covs)
+        bsinps: th.Tensor = th.cat(bsinps_l, dim=0)
+        # (sum(map(len, bsinps_l)), n_tmpls)
         bsouts: th.Tensor = nnet(bsinps)
         # compute selector loss
+        # (sum(map(len, bsinps_l)), )
+        bstargs: th.Tensor = th.repeat_interleave(
+            bstdata["cels"],
+            th.tensor([len(sinps) for sinps in bsinps_l], device=plf.device),
+            dim=0,
+        )
         bslosses: th.Tensor = th.nn.functional.mse_loss(
-            bsouts, bstdata["cels"], reduction="none"
+            bsouts, bstargs, reduction="none"
         )
         bsloss: th.Tensor = th.mean(bslosses)
         # update selector parameter
