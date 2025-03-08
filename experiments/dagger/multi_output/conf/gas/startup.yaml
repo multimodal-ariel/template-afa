@@ -23,7 +23,7 @@ warmup_nnet_tcfg:
   bsz: 1024
   save_ckpt_every_n_iter: 500
 dagger_nnet_tcfg:
-  n_fit_iter: 1_000_000
+  n_fit_iter: 50_000
   bsz: 32
   eval_every_n_iter: 100
   save_ckpt_every_n_iter: 5000
