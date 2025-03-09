@@ -1,0 +1,52 @@
+hydra:
+  job:
+    name: gas
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: gas
+  to_normalize: true
+bsz: 1024
+value_nnet:
+  _target_: mymodels.nn.make_fcn
+  layer_specs: [
+      [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+      [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+    ]
+predictor_nnet:
+  _target_: mymodels.nn.make_fcn
+  layer_specs: [
+      [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+      [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+    ]
+share_weights_layer_indices: [0, 3]
+pretrain_module_cfg:
+  masking_module:
+    _target_: dimelib.masking_pretrainer.MaskingPretrainModule
+    lr: 1e-3
+  masking_trainer:
+    _target_: pytorch_lightning.Trainer
+    accelerator: "auto"
+    max_epochs: 200
+    num_sanity_val_steps: 0
+cmi_module_cfg:
+  cmi_module:
+    _target_: dimelib.cmi_estimator.CMIEstimator
+    lr: 1e-3
+    min_lr: 1e-6
+    eps_decay: 0.2
+    max_features: 10
+    eps: 0.05
+    eps_steps: 10
+    patience: 5
+  cmi_trainer:
+    _target_: pytorch_lightning.Trainer
+    accelerator: "auto"
+    max_epochs: 200
+    num_sanity_val_steps: 0
+    precision: 16
