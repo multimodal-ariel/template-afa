@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import numpy as np
 import pytorch_lightning as pl
+import pytorch_lightning.loggers as pl_loggers
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -232,13 +235,29 @@ class CMIEstimator(pl.LightningModule):
             "Value Loss Train/Mean", value_network_loss, prog_bar=True, logger=False
         )
 
-        # Log in tensorboard.
-        self.logger.experiment.add_scalar(
-            "Loss Train/Mean", pred_loss, self.current_epoch
-        )
-        self.logger.experiment.add_scalar(
-            "Value Loss Train/Mean", value_network_loss, self.current_epoch
-        )
+        # # Log in tensorboard.
+        # self.logger.experiment.add_scalar(
+        #     "Loss Train/Mean", pred_loss, self.current_epoch
+        # )
+        # self.logger.experiment.add_scalar(
+        #     "Value Loss Train/Mean", value_network_loss, self.current_epoch
+        # )
+        for _logger in self.loggers:
+            if isinstance(_logger, pl_loggers.TensorBoardLogger):
+                _logger.experiment.add_scalar(
+                    "Loss Train/Mean", pred_loss, self.current_epoch
+                )
+                _logger.experiment.add_scalar(
+                    "Value Loss Train/Mean", value_network_loss, self.current_epoch
+                )
+            elif isinstance(_logger, pl_loggers.CSVLogger):
+                _logger.log_metrics(
+                    {
+                        "Loss Train/Mean": pred_loss.item(),
+                        "Value Loss Train/Mean": value_network_loss.item(),
+                    },
+                    step=self.current_epoch,
+                )
         self._train_outs_l.clear()
 
     def validation_step(self, batch, batch_idx):
@@ -352,20 +371,45 @@ class CMIEstimator(pl.LightningModule):
         self.log("Perf Val/Final", val_loss_final, prog_bar=True, logger=False)
         self.log("Eps Value", self.eps, prog_bar=False, logger=False)
 
-        # Log in tensorboard.
-        self.logger.experiment.add_scalar(
-            "Loss Val/Mean", pred_loss_mean, self.current_epoch
-        )
-        self.logger.experiment.add_scalar(
-            "Perf Val/Mean", val_loss_mean, self.current_epoch
-        )
-        self.logger.experiment.add_scalar(
-            "Loss Val/Final", pred_loss_final, self.current_epoch
-        )
-        self.logger.experiment.add_scalar(
-            "Perf Val/Final", val_loss_final, self.current_epoch
-        )
-        self.logger.experiment.add_scalar("Eps Value", self.eps, self.current_epoch)
+        # # Log in tensorboard.
+        # self.logger.experiment.add_scalar(
+        #     "Loss Val/Mean", pred_loss_mean, self.current_epoch
+        # )
+        # self.logger.experiment.add_scalar(
+        #     "Perf Val/Mean", val_loss_mean, self.current_epoch
+        # )
+        # self.logger.experiment.add_scalar(
+        #     "Loss Val/Final", pred_loss_final, self.current_epoch
+        # )
+        # self.logger.experiment.add_scalar(
+        #     "Perf Val/Final", val_loss_final, self.current_epoch
+        # )
+        # self.logger.experiment.add_scalar("Eps Value", self.eps, self.current_epoch)
+        for _logger in self.loggers:
+            if isinstance(_logger, pl_loggers.TensorBoardLogger):
+                _logger.experiment.add_scalar(
+                    "Loss Val/Mean", pred_loss_mean, self.current_epoch
+                )
+                _logger.experiment.add_scalar(
+                    "Perf Val/Mean", val_loss_mean, self.current_epoch
+                )
+                _logger.experiment.add_scalar(
+                    "Loss Val/Final", pred_loss_final, self.current_epoch
+                )
+                _logger.experiment.add_scalar(
+                    "Perf Val/Final", val_loss_final, self.current_epoch
+                )
+                _logger.experiment.add_scalar("Eps Value", self.eps, self.current_epoch)
+            elif isinstance(_logger, pl_loggers.CSVLogger):
+                _logger.log_metrics(
+                    {
+                        "Loss Val/Mean": pred_loss_mean.item(),
+                        "Perf Val/Mean": val_loss_mean.item(),
+                        "Loss Val/Final": pred_loss_final.item(),
+                        "Perf Val/Final": val_loss_final.item(),
+                    },
+                    step=self.current_epoch,
+                )
 
         # Take lr scheduler step using loss.
         sch = self.lr_schedulers()
