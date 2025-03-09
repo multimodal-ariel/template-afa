@@ -9,7 +9,7 @@ hydra:
 
 data:
   _target_: mydatasets.aaco.load_aaco_data
-  name: grid
+  name: grid_data
   to_normalize: true
 bsz: 1024
 value_nnet:
