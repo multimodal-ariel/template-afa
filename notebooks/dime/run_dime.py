@@ -16,7 +16,7 @@ import pytorch_lightning.callbacks as pl_callbacks
 import pytorch_lightning.plugins.environments as pl_plugins_envs
 
 # %%
-tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("cube", to_normalize=False)
+tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("mnist", to_normalize=False)
 n_covs: int = tdata["xs"].shape[1]
 n_labels: int = len(th.unique(tdata["ys"]))
 
