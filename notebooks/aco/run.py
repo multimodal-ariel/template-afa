@@ -116,7 +116,6 @@ def aaco_rollout(
     nearest_neighbors = n_neighs
     hide_val = 10
     # num_instances = config["num_instances"]  # Number of instances to loop through
-    num_instances = n_instances if n_instances is not None else len(X_train)
 
     # Decide whether to use training or validation data
     # if config["train_or_validation"] == "train":
@@ -128,6 +127,8 @@ def aaco_rollout(
         X = X_valid
         y = y_valid
         not_i = False  # Allow instance to be its own neighbor in KNN
+
+    num_instances = n_instances if n_instances is not None else len(X)
 
     # Initialize lists to store results
     X_rollout = []
@@ -141,10 +142,8 @@ def aaco_rollout(
     ##############################################
     ##### AACO Rollout
     ##############################################
-
-    for i in tqdm.trange(
-        num_instances
-    ):  # Loop through the specified number of instances
+    # Loop through the specified number of instances
+    for i in tqdm.trange(num_instances, dynamic_ncols=True, leave=False):
         # print(f"Starting instance {i} at {datetime.datetime.now()}")
 
         # Initialize the current mask (start with no features)
