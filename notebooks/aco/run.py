@@ -288,7 +288,7 @@ def aaco_rollout(
             "Action": th.cat(action_rollout),
             "y": th.cat(y_rollout),
         }
-    )
+    ).auto_batch_size_(batch_dims=1)
     return results
 
 
