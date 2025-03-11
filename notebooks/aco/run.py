@@ -21,23 +21,27 @@ import xgboost as xgbst
 # %%
 # Load the appropriate classifier based on dataset and model
 def load_classifier(dataset_name, X_train, y_train, input_dim):
-    if dataset_name == "cube":
+    if dataset_name == "cube_20_0.3":
         # Use the ground truth classifier for Cube dataset
         return aacolib.classifier.classifier_ground_truth(
             num_features=20, num_classes=8, std=0.3
         )
 
-    elif dataset_name == "grid" or dataset_name == "gas10":
+    elif (
+        dataset_name == "grid_data"
+        or dataset_name == "gas"
+        # or dataset_name == "big5_C_cls"
+    ):
         # Use XGB dictionary classifier for Grid and Gas10 datasets
         return aacolib.classifier.classifier_xgb_dict(
-            output_dim=y_train.shape[1],
+            output_dim=len(th.unique(y_train)),
             input_dim=input_dim,
             subsample_ratio=0.01,
             X_train=X_train,
             y_train=y_train,
         )
 
-    elif dataset_name == "MNIST":
+    elif dataset_name == "mnist":
         # Load XGBoost model for MNIST dataset
         xgb_model = xgbst.XGBClassifier()
         xgb_model.load_model("models/xgb_classifier_MNIST_random_subsets_5.json")
@@ -77,7 +81,11 @@ def get_knn(
 def load_mask_generator(dataset_name, input_dim):
     if dataset_name in ["cube_20_0.3", "mnist"]:
         return aacolib.mask_generator.random_mask_generator(10000, input_dim, 1000)
-    elif dataset_name == "grid_data" or dataset_name == "gas":
+    elif (
+        dataset_name == "grid_data"
+        or dataset_name == "gas"
+        # or dataset_name == "big5_C_cls"
+    ):
         all_masks = aacolib.mask_generator.generate_all_masks(
             input_dim
         )  # Generate all possible masks for grid and gas10
