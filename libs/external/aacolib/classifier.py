@@ -82,7 +82,7 @@ class classifier_xgb_dict:
         self.input_dim = input_dim
         self.subsample_ratio = subsample_ratio
         self.X_train_numpy = X_train.numpy()
-        self.y_train_numpy = y_train.argmax(dim=1).numpy()
+        self.y_train_numpy = y_train.numpy()
 
     def __call__(self, X, idx):
         n = X.shape[0]
