@@ -293,12 +293,12 @@ def aaco_rollout(
 
 
 # %%
-# NOTE big5
-data_name: str = "big5_C_cls"
+# NOTE cube
+data_name: str = "cube_20_0.3"
+max_tdata: Optional[int] = None
 tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 n_covs: int = tdata["xs"].shape[1]
 n_labels: int = len(th.unique(tdata["ys"]))
-max_tdata: Optional[int] = 8192
 metrics_func = thm.MetricCollection(
     {
         "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
@@ -308,18 +308,45 @@ metrics_func = thm.MetricCollection(
         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
     }
 )
-init_fidx: int = 35
-n_tmpls_targ: int = 128
+init_fidx: int = 6
+n_tmpls_targ: int = 64
 n_cands_targ: int = 10_000
-lmbda: float = 0.075
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
 min_features_init: int = 10
 n_neighs: int = 10
-n_rounds: int = 3
 feature_decrement: int = 2
-use_feature_importance_sampling: bool = True
-bsz: int = 8192
+lmbda: float = 0.3
+bsz: int = 1024
+
+# %%
+# # NOTE big5
+# data_name: str = "big5_C_cls"
+# tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+# n_covs: int = tdata["xs"].shape[1]
+# n_labels: int = len(th.unique(tdata["ys"]))
+# max_tdata: Optional[int] = 8192
+# metrics_func = thm.MetricCollection(
+#     {
+#         "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+#         "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+#         "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+#         "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+#         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+#     }
+# )
+# init_fidx: int = 35
+# n_tmpls_targ: int = 128
+# n_cands_targ: int = 10_000
+# lmbda: float = 0.075
+# min_features_targ: int = 1
+# max_features_targ: Optional[int] = None
+# min_features_init: int = 10
+# n_neighs: int = 10
+# n_rounds: int = 3
+# feature_decrement: int = 2
+# use_feature_importance_sampling: bool = True
+# bsz: int = 8192
 
 # %%
 classifier = load_classifier(
@@ -330,9 +357,9 @@ mask_generator = load_mask_generator(dataset_name=data_name, input_dim=n_covs)
 # %%
 result: thd.TensorDict = aaco_rollout(
     X_train=tdata["xs"],
-    y_train=tdata["ys"],
+    y_train=th.nn.functional.one_hot(tdata["ys"], num_classes=n_labels),
     X_valid=vdata["xs"],
-    y_valid=vdata["ys"],
+    y_valid=th.nn.functional.one_hot(vdata["ys"], num_classes=n_labels),
     classifier=classifier,
     mask_generator=mask_generator,
     initial_feature=init_fidx,
