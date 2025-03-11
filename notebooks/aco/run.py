@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional
+from typing import Optional
 
-import aacolib.mask_generator
 import aacolib.classifier
-import lightning as pl
+import aacolib.mask_generator
 import lightning.fabric.loggers as plf_loggers
 import mydatasets.aaco
-import mylib.ml
-import mymodels.classifiers
+import pandas as pd
 import tensordict as thd
 import torch as th
 import torchmetrics as thm
@@ -314,9 +312,9 @@ n_cands_targ: int = 10_000
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
 min_features_init: int = 10
-n_neighs: int = 10
+n_neighs: int = 20
 feature_decrement: int = 2
-lmbda: float = 0.3
+lmbda: float = 0.05
 bsz: int = 1024
 
 # %%
@@ -349,6 +347,12 @@ bsz: int = 1024
 # bsz: int = 8192
 
 # %%
+output_dir: str = os.path.join("outputs", "run", data_name)
+os.makedirs(output_dir, exist_ok=True)
+tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
+csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
+
+# %%
 classifier = load_classifier(
     dataset_name=data_name, X_train=tdata["xs"], y_train=tdata["ys"], input_dim=n_covs
 )
@@ -368,7 +372,24 @@ result: thd.TensorDict = aaco_rollout(
     is_train=False,
     n_instances=None,
 )
+th.save(result, os.path.join(output_dir, "results.pt"))
 
 # %%
+ridxs: th.Tensor = th.argwhere(result["Action"][:, -1] == 1).flatten()
+inps = th.cat(
+    [
+        result["X"][ridxs] * result["mask"][ridxs] - (1 - result["mask"][ridxs]) * 10,
+        result["mask"][ridxs],
+    ],
+    dim=1,
+)
+pyhats: th.Tensor = classifier(inps, None)
+
+# %%
+metrics_func.reset()
+metrics_func.update(pyhats, th.argmax(result["y"][ridxs], dim=1))
+metrics_d = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+print(pd.Series(metrics_d))
 
 # %%
