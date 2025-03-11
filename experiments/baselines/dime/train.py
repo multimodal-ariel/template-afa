@@ -136,6 +136,7 @@ def main(cfg: MainConf):
     )
     cmi_trainer.fit(cmi_module, tloader, vloader)
     tfb_logger.finalize("success")
+    csv_logger.finalize("success")
 
 
 if __name__ == "__main__":
