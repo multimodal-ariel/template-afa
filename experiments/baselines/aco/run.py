@@ -35,11 +35,7 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
             num_features=20, num_classes=8, std=0.3
         )
 
-    elif (
-        dataset_name == "grid_data"
-        or dataset_name == "gas"
-        # or dataset_name == "big5_C_cls"
-    ):
+    elif dataset_name == "grid_data" or dataset_name == "gas":
         # Use XGB dictionary classifier for Grid and Gas10 datasets
         return aacolib.classifier.classifier_xgb_dict(
             output_dim=len(th.unique(y_train)),
@@ -52,9 +48,25 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
     elif dataset_name == "mnist":
         # Load XGBoost model for MNIST dataset
         xgb_model = xgbst.XGBClassifier()
-        xgb_model.load_model("models/xgb_classifier_MNIST_random_subsets_5.json")
+        xgb_model.load_model(
+            os.path.join(
+                os.path.dirname(aacolib.__file__),
+                "_saved_models",
+                "libs/external/aacolib/_saved_models/mnist_xgb_classifier_arb_subset.json",
+            )
+        )
         return aacolib.classifier.classifier_xgb(xgb_model)
-
+    elif dataset_name == "big5_C_cls":
+        # Load XGBoost model for MNIST dataset
+        xgb_model = xgbst.XGBClassifier()
+        xgb_model.load_model(
+            os.path.join(
+                os.path.dirname(aacolib.__file__),
+                "_saved_models",
+                "libs/external/aacolib/_saved_models/cube_xgb_classifier_arb_subsets.json",
+            )
+        )
+        return aacolib.classifier.classifier_xgb(xgb_model)
     else:
         raise ValueError("Unsupported dataset or model")
 
@@ -87,13 +99,9 @@ def get_knn(
 
 # Helper function to load the mask generator based on the dataset
 def load_mask_generator(dataset_name, input_dim):
-    if dataset_name in ["cube_20_0.3", "mnist"]:
+    if dataset_name in ["cube_20_0.3", "mnist", "big5_C_cls"]:
         return aacolib.mask_generator.random_mask_generator(10000, input_dim, 1000)
-    elif (
-        dataset_name == "grid_data"
-        or dataset_name == "gas"
-        # or dataset_name == "big5_C_cls"
-    ):
+    elif dataset_name == "grid_data" or dataset_name == "gas":
         all_masks = aacolib.mask_generator.generate_all_masks(
             input_dim
         )  # Generate all possible masks for grid and gas10
