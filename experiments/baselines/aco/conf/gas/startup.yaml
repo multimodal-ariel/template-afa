@@ -15,3 +15,4 @@ init_fidx: 6
 lmbda: 0.05
 n_neighs: 10
 eval_bsz: 1024
+n_instances: 20000

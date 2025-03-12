@@ -25,6 +25,7 @@ class MainConf:
     lmbda: int
     n_neighs: int
     eval_bsz: int | None
+    n_instances: int | None
 
 
 # Load the appropriate classifier based on dataset and model
@@ -336,7 +337,7 @@ def main(cfg: MainConf):
         acquisition_cost=cfg.lmbda,
         n_neighs=cfg.n_neighs,
         is_train=False,
-        n_instances=None,
+        n_instances=cfg.n_instances if hasattr(cfg, "n_instances") else None,
     )
     th.save(result, os.path.join(output_dir, "results.pt"))
     # forward prop. classifier
