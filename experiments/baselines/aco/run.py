@@ -24,6 +24,7 @@ class MainConf:
     init_fidx: int
     lmbda: int
     n_neighs: int
+    eval_bsz: int | None
 
 
 # Load the appropriate classifier based on dataset and model
@@ -332,15 +333,35 @@ def main(cfg: MainConf):
     th.save(result, os.path.join(output_dir, "results.pt"))
     # forward prop. classifier
     ridxs: th.Tensor = th.argwhere(result["Action"][:, -1] == 1).flatten()
-    inps = th.cat(
+    # # without batch
+    # inps = th.cat(
+    #     [
+    #         result["X"][ridxs] * result["mask"][ridxs]
+    #         - (1 - result["mask"][ridxs]) * 10,
+    #         result["mask"][ridxs],
+    #     ],
+    #     dim=1,
+    # )
+    # pyhats: th.Tensor = classifier(inps, None)
+    # eval split with batch
+    bsz: int = cfg.eval_bsz if cfg.eval_bsz is not None else len(ridxs)
+    pyhats: th.Tensor = th.cat(
         [
-            result["X"][ridxs] * result["mask"][ridxs]
-            - (1 - result["mask"][ridxs]) * 10,
-            result["mask"][ridxs],
+            classifier(
+                th.cat(
+                    [
+                        result["X"][_ridxs] * result["mask"][_ridxs]
+                        - (1 - result["mask"][_ridxs]) * 10,
+                        result["mask"][_ridxs],
+                    ],
+                    dim=1,
+                ),
+                None,
+            )
+            for _ridxs in th.split(ridxs, bsz)
         ],
-        dim=1,
+        dim=0,
     )
-    pyhats: th.Tensor = classifier(inps, None)
     # compute metrics
     metrics_func = thm.MetricCollection(
         {
