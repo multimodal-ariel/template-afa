@@ -95,7 +95,7 @@ class classifier_xgb_dict:
             # Is the mask in the dictionary?
             if mask_i_string not in self.xgb_model_dict:
                 self.xgb_model_dict[mask_i_string] = XGBClassifier(
-                    n_estimators=250, max_depth=5, random_state=29, n_jobs=8
+                    n_estimators=250, max_depth=5, random_state=29, n_jobs=-1
                 )
                 X_train_subset = self.X_train_numpy[:, nonzero_i].reshape(
                     self.X_train_numpy.shape[0], -1
@@ -130,6 +130,7 @@ class classifier_ground_truth:
 class classifier_xgb:
     def __init__(self, xgb_model):
         self.xgb_model = xgb_model
+        self.xgb_model.set_params(n_jobs=-1)
 
     def __call__(self, X, idx):
         return th.tensor(self.xgb_model.predict_proba(X))
