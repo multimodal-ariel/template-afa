@@ -1,0 +1,18 @@
+hydra:
+  job:
+    name: cube
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: cube_20_0.3
+  to_normalize: false
+bsz: 1024
+init_fidx: 6
+lmbda: 0.3
+eval_bsz: 1024
+n_neighs: 10
