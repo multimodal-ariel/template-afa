@@ -249,6 +249,7 @@ class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]
         pyhats: th.Tensor = th.softmax(outs, dim=1)
         return pyhats
 
+    @th.enable_grad()
     def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
         tdata: thd.TensorDict = self.tdata
         _fcounts: th.Tensor = th.sum(acts_tmpls, dim=0)
