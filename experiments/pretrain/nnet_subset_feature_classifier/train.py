@@ -137,7 +137,7 @@ def main(cfg: MainConf):
     tmetrics_d: dict[str, float] = classifier.fit_(tmpls)
     plf.log_dict(mylib.utils.add_prefix_to_dict(tmetrics_d, "train"))
     # save classifier
-    plf.save(os.path.join(output_dir, "classifier.pt"), classifier.state_dict())
+    th.save(classifier.state_dict(), os.path.join(output_dir, "classifier.pt"))
     # log metrics
     vmetrics_d: dict[str, float] = classifier.evaluate(vdata, tmpls, init_fidx=None)
     plf.log_dict(mylib.utils.add_prefix_to_dict(vmetrics_d, "val"))
