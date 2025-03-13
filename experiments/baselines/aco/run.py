@@ -64,7 +64,7 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
             os.path.join(
                 os.path.dirname(aacolib.__file__),
                 "_saved_models",
-                "cube_xgb_classifier_arb_subsets.json",
+                "big5_xgb_classifier_arb_subsets.json",
             )
         )
         return aacolib.classifier.classifier_xgb(xgb_model)
