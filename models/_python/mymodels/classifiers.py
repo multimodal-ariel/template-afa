@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from functools import partial
-from typing import Any, Callable, Final, Generic, TypeVar
+from functools import cached_property, partial
+import math
+from typing import Any, Callable, Final, Generic, Optional, Type, TypedDict, TypeVar
 
 import mymodels.common
 import mymodels.protocols
@@ -10,7 +11,10 @@ import numpy as np
 import sklearn.cluster as skl_cluster
 import sklearn.linear_model as skl_linear_model
 import sklearn.neighbors as skl_neighbors
+import tensordict as thd
 import torch as th
+import torchmetrics as thm
+import tqdm.auto as tqdm
 import xgboost as xgbst
 
 MT = TypeVar("MT")
@@ -109,6 +113,232 @@ class SubsetFeatureClassifier(th.nn.Module, ABC, Generic[MT]):
 class SubsetFeatureConcatClassifier(SubsetFeatureClassifier[MT]):
     @abstractmethod
     def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]: ...
+
+
+class SubsetFeatureConcatXGBClassifier(SubsetFeatureConcatClassifier[None]):
+    xgb_kwargs: dict[str, Any]
+    fraction_training_data_per_split: float
+    n_splits: int
+    n_tmpl_per_instance: int
+    rseed: Optional[int]
+
+    _models: list[xgbst.XGBClassifier]
+
+    def __init__(
+        self,
+        xs_train: np.ndarray,
+        ys_train: np.ndarray,
+        xgb_kwargs: dict[str, Any],
+        fraction_training_data_per_split: float,
+        n_splits: int,
+        n_tmpl_per_instance: int,
+        rseed: Optional[int] = None,
+    ):
+        super().__init__(n_experts_per_act=1, xs_train=xs_train, ys_train=ys_train)
+        self.xgb_kwargs = xgb_kwargs
+        self.fraction_training_data_per_split = fraction_training_data_per_split
+        self.n_splits = n_splits
+        self.n_tmpl_per_instance = n_tmpl_per_instance
+        self.rseed = rseed
+        self._models = [xgbst.XGBClassifier(**self.xgb_kwargs) for _ in range(n_splits)]
+
+    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
+        txs: th.Tensor = th.as_tensor(self.xs_train, dtype=th.float32)
+        tys: th.Tensor = th.as_tensor(self.ys_train)
+        pbar = tqdm.tqdm(
+            self._models, desc="model rsplit", dynamic_ncols=True, leave=False
+        )
+        for _m in pbar:
+            _n_data: int = math.ceil(len(txs) * self.fraction_training_data_per_split)
+            _idxs: th.Tensor = th.randint(0, len(txs), size=(_n_data,), dtype=th.long)
+            # (_n_data, n_tmpl_per_instance, n_covs)
+            _xs: th.Tensor = txs[_idxs, None, :].expand(
+                -1, self.n_tmpl_per_instance, -1
+            )
+            _fms: th.Tensor = th.stack(
+                [
+                    acts_tmpls[
+                        th.multinomial(
+                            th.arange(0, len(acts_tmpls), dtype=th.float32),
+                            self.n_tmpl_per_instance,
+                        )
+                    ]
+                    for _ in range(len(_xs))
+                ]
+            )
+            # (_n_data, n_tmple_per_instance, 2 * n_covs)
+            _minps: th.Tensor = th.cat((_xs * _fms, _fms), dim=2)
+            # (_n_data, n_tmpl_per_instance)
+            _ys: th.Tensor = tys[_idxs, None].expand(-1, self.n_tmpl_per_instance)
+            _m.fit(_minps.flatten(0, 1).numpy(), _ys.flatten(0, 1).numpy())
+        pbar.close()
+        return dict()
+
+    def predict_proba(self, ctxs: th.Tensor, acts: th.Tensor) -> th.Tensor:
+        device: th.device = ctxs.device
+        ctxs = ctxs.to(device="cpu")
+        acts = acts.to(device="cpu")
+        # (n, n_covs * 2)
+        minps: th.Tensor = th.cat((ctxs * acts, acts), dim=1)
+        # (n, n_splits, n_labels)
+        pyhats: th.Tensor = th.stack(
+            [
+                th.as_tensor(
+                    _m.predict_proba(minps.numpy(force=True)), dtype=th.float32
+                )
+                for _m in self._models
+            ],
+            dim=1,
+        )
+        # (n, n_labels)
+        pyhats = th.mean(pyhats, dim=1).to(device=device)
+        return pyhats
+
+    def __getitem__(self, key: tuple[int, ...]) -> None:
+        return None
+
+
+class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]):
+    class _FitKwargs(TypedDict):
+        opt_type: Type[th.optim.Optimizer]
+        opt_kwargs: dict[str, Any]
+        n_iter: int
+        bsz: int
+
+    nnet: th.nn.Module
+    fit_kwargs: _FitKwargs
+
+    @cached_property
+    def tdata(self) -> thd.TensorDict:
+        return thd.make_tensordict(
+            {
+                "xs": th.as_tensor(self.xs_train, dtype=th.float32),
+                "ys": th.as_tensor(self.ys_train, dtype=th.long),
+            }
+        ).auto_batch_size_(1)
+
+    def __init__(
+        self,
+        nnet: th.nn.Module,
+        xs_train: np.ndarray,
+        ys_train: np.ndarray,
+        fit_kwargs: _FitKwargs,
+    ):
+        super().__init__(
+            n_experts_per_act=1,
+            xs_train=xs_train,
+            ys_train=ys_train,
+        )
+        self.nnet = nnet
+        self.fit_kwargs = fit_kwargs
+
+    def predict_proba(self, ctxs: th.Tensor, acts: th.Tensor) -> th.Tensor:
+        # (n, n_covs * 2)
+        inps: th.Tensor = th.cat((ctxs * acts, acts), dim=1)
+        outs: th.Tensor = self.nnet(inps)
+        pyhats: th.Tensor = th.softmax(outs, dim=1)
+        return pyhats
+
+    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
+        tdata: thd.TensorDict = self.tdata
+        _fcounts: th.Tensor = th.sum(acts_tmpls, dim=0)
+        init_fidx: int | None = (
+            None
+            if len(th.argwhere(_fcounts == len(acts_tmpls)).flatten()) == 0
+            else int(th.argwhere(_fcounts == len(acts_tmpls)).flatten()[0].item())
+        )
+        # fit classifier
+        opt = self.fit_kwargs["opt_type"](
+            self.nnet.parameters(), **self.fit_kwargs["opt_kwargs"]
+        )
+        self.train()
+        pbar = tqdm.trange(
+            self.fit_kwargs["n_iter"],
+            desc="fit_subset_cls",
+            leave=False,
+            dynamic_ncols=True,
+        )
+        for _ in pbar:
+            _btdata: thd.TensorDict = tdata[
+                th.randint(0, len(tdata), (self.fit_kwargs["bsz"],))
+            ].to(device=self.device)
+            _binps: th.Tensor = self._make_subset_feature_concat_nnet_classifier_binps(
+                btdata=_btdata, acts_tmpls=acts_tmpls, init_fidx=init_fidx
+            )
+            _bouts: th.Tensor = self.nnet(_binps)
+            _bcel: th.Tensor = th.nn.functional.cross_entropy(_bouts, _btdata["ys"])
+            opt.zero_grad()
+            _bcel.backward()
+            opt.step()
+            pbar.set_postfix({"bcel": _bcel.item()})
+        pbar.close()
+        # eval classifier
+        self.eval()
+        metrics_d: dict[str, float] = self.evaluate(
+            data=self.tdata, tmpls=acts_tmpls, init_fidx=init_fidx
+        )
+        return metrics_d
+
+    @th.no_grad()
+    def evaluate(
+        self, data: thd.TensorDict, tmpls: th.Tensor, init_fidx: Optional[int]
+    ) -> dict[str, float]:
+        metrics_func = thm.MetricCollection(
+            {
+                "acc": thm.Accuracy(task="multiclass", num_classes=self.n_labels),
+                "precision": thm.Precision(
+                    task="multiclass", num_classes=self.n_labels
+                ),
+                "recall": thm.Recall(task="multiclass", num_classes=self.n_labels),
+                "f1-score": thm.F1Score(task="multiclass", num_classes=self.n_labels),
+                "auroc": thm.AUROC(task="multiclass", num_classes=self.n_labels),
+            }
+        )
+        metrics_func.reset()
+        self.eval()
+        for _bdata in data.split(self.fit_kwargs["bsz"]):  # type:ignore
+            _bdata: thd.TensorDict = _bdata.to(device=self.device)
+            _binps: th.Tensor = self._make_subset_feature_concat_nnet_classifier_binps(
+                btdata=_bdata, acts_tmpls=tmpls, init_fidx=init_fidx
+            )
+            _bpyhats: th.Tensor = th.nn.functional.softmax(self.nnet(_binps), dim=1)
+            metrics_func.update(
+                _bpyhats.to(device="cpu"), _bdata["ys"].to(device="cpu")
+            )
+        metrics_d: dict[str, float] = {
+            k: v.item() for k, v in metrics_func.compute().items()
+        }
+        metrics_func.reset()
+        return metrics_d
+
+    @staticmethod
+    @th.no_grad()
+    def _make_subset_feature_concat_nnet_classifier_binps(
+        btdata: thd.TensorDict, acts_tmpls: th.Tensor, init_fidx: Optional[int]
+    ) -> th.Tensor:
+        device: th.device = btdata["xs"].device
+        bsz: int = len(btdata)
+        bnms: th.Tensor = acts_tmpls[
+            th.randint(0, len(acts_tmpls), (bsz,), device="cpu")
+        ]
+        bnms = bnms * th.randint_like(bnms, 0, 2)
+        # ensure at least one feature is active
+        if init_fidx is not None:
+            # the case where init_fidx is clearly specified
+            bnms[:, init_fidx] = 1
+        else:
+            # in case of no init_fidx specified
+            # just replace entries without features with randomly drawn templates
+            _bnms_ngidxs: th.Tensor = th.argwhere(th.sum(bnms, dim=1) == 0).flatten()
+            bnms[_bnms_ngidxs] = acts_tmpls[
+                th.randint(0, len(acts_tmpls), (len(_bnms_ngidxs),), device="cpu")
+            ]
+        bnms = bnms.to(device=device)
+        binps: th.Tensor = th.cat((btdata["xs"] * bnms, bnms), dim=1)
+        return binps
+
+    def __getitem__(self, key: tuple[int, ...]) -> None:
+        return None
 
 
 class _SubsetFeatureSKLClassifier(SubsetFeatureClassifier[SKLMT]):
