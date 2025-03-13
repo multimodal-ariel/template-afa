@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from functools import cached_property, partial
-import math
-from typing import Any, Callable, Final, Generic, Optional, Type, TypedDict, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Final,
+    Generic,
+    Optional,
+    Self,
+    Type,
+    TypedDict,
+    TypeVar,
+)
 
 import mymodels.common
 import mymodels.protocols
@@ -339,6 +349,23 @@ class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]
 
     def __getitem__(self, key: tuple[int, ...]) -> None:
         return None
+
+    @classmethod
+    def from_saved_state_dict(
+        cls,
+        nnet: th.nn.Module,
+        xs_train: np.ndarray,
+        ys_train: np.ndarray,
+        fit_kwargs: _FitKwargs,
+        state_dict_p: str,
+    ) -> Self:
+        classifier = cls(
+            nnet=nnet, xs_train=xs_train, ys_train=ys_train, fit_kwargs=fit_kwargs
+        )
+        classifier.load_state_dict(
+            th.load(state_dict_p, map_location=classifier.device)
+        )
+        return classifier
 
 
 class _SubsetFeatureSKLClassifier(SubsetFeatureClassifier[SKLMT]):
