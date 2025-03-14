@@ -10,12 +10,9 @@ import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
 import lightning.fabric.plugins.environments as plf_plugins_envs
-import mylib.utils
-import mymodels.classifiers
-import mymodels.nn
-import mymodels.protocols
-import tafalib.functional
-import tafalib.utils
+import mylib
+import mymodels
+import tafalib
 import tensordict as thd
 import torch as th
 import torchmetrics as thm
@@ -72,11 +69,11 @@ def main(cfg: MainConf):
         )
     # configure logger and ckpt path
     os.makedirs(output_dir, exist_ok=True)
-    tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")
-    csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")
+    tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
+    csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
     plf: pl.Fabric = hd.utils.instantiate(cfg.plf, _partial_=True)(
         loggers=[tfb_logger, csv_logger],
-        plugins=[plf_plugins_envs.LightningEnvironment()],
+        plugins=[plf_plugins_envs.LightningEnvironment()],  # type: ignore
     )
     metrics_func = thm.MetricCollection(
         {
