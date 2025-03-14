@@ -9,7 +9,6 @@ import mymodels.nn
 import mymodels.protocols
 import tensordict as thd
 import torch as th
-import torch.distributions.utils
 import torchmetrics as thm
 import tqdm.auto as tqdm
 
@@ -18,13 +17,66 @@ def feature_masks_to_feature_combs(tmpls: th.Tensor):
     return [tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls]
 
 
+# NOTE high memory usage
+# @th.no_grad()
+# def precomp_rwds_for_tmpls(
+#     tmpls: th.Tensor,
+#     data: thd.TensorDict,
+#     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+#     lmbda: float,
+#     bsz: int,
+# ) -> thd.TensorDict:
+#     txs: th.Tensor = data["xs"]
+#     tys: th.Tensor = data["ys"]
+#     n_cands: int = len(tmpls)
+#     n_labels: int = len(th.unique(tys))
+#     # (n_data,  n_cands, n_labels)
+#     pyhats: th.Tensor = th.empty((len(txs), n_cands, n_labels), dtype=th.float32)
+#     # (n_data,  n_cands)
+#     cels: th.Tensor = th.empty((len(txs), n_cands), dtype=th.float32)
+#     rwds: th.Tensor = th.empty_like(cels)
+#     pbar = tqdm.tqdm(
+#         th.split(th.arange(0, len(txs), dtype=th.long), bsz),
+#         desc="precomp candidates",
+#         leave=False,
+#         dynamic_ncols=True,
+#     )
+#     for _btidxs in pbar:
+#         _bsz: int = len(_btidxs)
+#         # (_bsz * n_cands, n_covs)
+#         _bctxs: th.Tensor = txs[_btidxs, None, :].expand(-1, n_cands, -1).flatten(0, 1)
+#         _bacts: th.Tensor = tmpls[None, :, :].expand(_bsz, -1, -1).flatten(0, 1)
+#         _bctxs = _bctxs * _bacts
+#         # (_bsz * n_cands, n_labels)
+#         _bpyhats: th.Tensor = classifier.predict_proba(_bctxs, _bacts)
+#         _blyhats: th.Tensor = torch.distributions.utils.probs_to_logits(_bpyhats)
+#         # (_bsz * n_cands)
+#         _btys: th.Tensor = tys[_btidxs, None].expand(-1, n_cands).flatten(0, 1)
+#         _bcels: th.Tensor = th.nn.functional.cross_entropy(
+#             _blyhats, _btys, reduction="none"
+#         )
+#         _brwds: th.Tensor = -_bcels - lmbda * th.sum(_bacts, dim=1)
+#         pyhats[_btidxs] = _bpyhats.unflatten(0, (_bsz, n_cands))
+#         cels[_btidxs] = _bcels.unflatten(0, (_bsz, n_cands))
+#         rwds[_btidxs] = _brwds.unflatten(0, (_bsz, n_cands))
+#     pbar.close()
+#     # turn into tensordict
+#     tpcomp = thd.TensorDict(
+#         {"pyhats": pyhats, "cels": cels, "rwds": rwds}
+#     ).auto_batch_size_(1)
+#     return tpcomp
+
+
+@th.no_grad()
 def precomp_rwds_for_tmpls(
     tmpls: th.Tensor,
     data: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     lmbda: float,
     bsz: int,
+    plf: pl.Fabric,
 ) -> thd.TensorDict:
+    classifier.eval().to(device=plf.device)
     txs: th.Tensor = data["xs"]
     tys: th.Tensor = data["ys"]
     n_cands: int = len(tmpls)
@@ -34,30 +86,30 @@ def precomp_rwds_for_tmpls(
     # (n_data,  n_cands)
     cels: th.Tensor = th.empty((len(txs), n_cands), dtype=th.float32)
     rwds: th.Tensor = th.empty_like(cels)
+    # loop over dataset using flattened indices tensor splitted with bsz
     pbar = tqdm.tqdm(
-        th.split(th.arange(0, len(txs), dtype=th.long), bsz),
+        th.split(th.cartesian_prod(th.arange(len(data)), th.arange(n_cands)), bsz),
         desc="precomp candidates",
         leave=False,
         dynamic_ncols=True,
     )
-    for _btidxs in pbar:
-        _bsz: int = len(_btidxs)
-        # (_bsz * n_cands, n_covs)
-        _bctxs: th.Tensor = txs[_btidxs, None, :].expand(-1, n_cands, -1).flatten(0, 1)
-        _bacts: th.Tensor = tmpls[None, :, :].expand(_bsz, -1, -1).flatten(0, 1)
-        _bctxs = _bctxs * _bacts
-        # (_bsz * n_cands, n_labels)
-        _bpyhats: th.Tensor = classifier.predict_proba(_bctxs, _bacts)
-        _blyhats: th.Tensor = torch.distributions.utils.probs_to_logits(_bpyhats)
-        # (_bsz * n_cands)
-        _btys: th.Tensor = tys[_btidxs, None].expand(-1, n_cands).flatten(0, 1)
-        _bcels: th.Tensor = th.nn.functional.cross_entropy(
-            _blyhats, _btys, reduction="none"
+    for _bidxs in pbar:
+        # (_bsz, n_covs)
+        _bacts: th.Tensor = tmpls[_bidxs[:, 1], :]
+        _bctxs: th.Tensor = txs[_bidxs[:, 0], :] * _bacts
+        # (_bsz, n_labels)
+        _bpyhats: th.Tensor = classifier.predict_proba(
+            _bctxs.to(device=plf.device), _bacts.to(device=plf.device)
+        ).to(device="cpu")
+        # (_bsz, )
+        _bcels: th.Tensor = th.nn.functional.nll_loss(
+            th.log(_bpyhats), tys[_bidxs[:, 0]], reduction="none"
         )
         _brwds: th.Tensor = -_bcels - lmbda * th.sum(_bacts, dim=1)
-        pyhats[_btidxs] = _bpyhats.unflatten(0, (_bsz, n_cands))
-        cels[_btidxs] = _bcels.unflatten(0, (_bsz, n_cands))
-        rwds[_btidxs] = _brwds.unflatten(0, (_bsz, n_cands))
+        # set it back to result tensor
+        pyhats[_bidxs[:, 0], _bidxs[:, 1], :] = _bpyhats
+        cels[_bidxs[:, 0], _bidxs[:, 1]] = _bcels
+        rwds[_bidxs[:, 0], _bidxs[:, 1]] = _brwds
     pbar.close()
     # turn into tensordict
     tpcomp = thd.TensorDict(
@@ -66,6 +118,7 @@ def precomp_rwds_for_tmpls(
     return tpcomp
 
 
+@th.no_grad()
 def run_one_episode(
     x: th.Tensor,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -74,9 +127,11 @@ def run_one_episode(
     tmpls: th.Tensor,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+    classifier.eval().to(device=plf.device)
     if isinstance(cost_est, th.nn.Module):
         cost_est.eval().to(device=plf.device)
-    tmpls = tmpls.to(plf.device)
+    x = x.to(device=plf.device)
+    tmpls = tmpls.to(device=plf.device)
     fobsd_l: list[int] = [init_fidx]
     fcomb: tuple[int, ...] | None = None
     for _ in itrtls.count():
@@ -87,7 +142,7 @@ def run_one_episode(
         # (1, 2 * n_covs)
         _inps: th.Tensor = th.cat((x * _fm, _fm))[None, :]
         # (1, n_tmpls)
-        _costs: th.Tensor = cost_est(_inps.to(device=plf.device))
+        _costs: th.Tensor = cost_est(_inps)
         _tmpl_idx: int = int(th.argmin(_costs[0]).item())
         _fm_avail: th.Tensor = th.maximum(
             tmpls[_tmpl_idx] - _fm, th.as_tensor(0.0, device=plf.device)
@@ -103,6 +158,7 @@ def run_one_episode(
     return pyhats[0], fobsd_l, fcomb
 
 
+@th.no_grad()
 def run_one_episode_all_obsd(
     x: th.Tensor,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -111,8 +167,11 @@ def run_one_episode_all_obsd(
     tmpls: th.Tensor,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+    classifier.eval().to(device=plf.device)
     if isinstance(cost_est, th.nn.Module):
         cost_est.eval().to(device=plf.device)
+    x = x.to(device=plf.device)
+    tmpls = tmpls.to(device=plf.device)
     fobsd_l: list[int] = [init_fidx]
     for _ in itrtls.count():
         # make feature bit mask
@@ -122,9 +181,11 @@ def run_one_episode_all_obsd(
         # (1, 2 * n_covs)
         _inps: th.Tensor = th.cat((x * _fm, _fm))[None, :]
         # (1, n_tmpls)
-        _costs: th.Tensor = cost_est(_inps.to(device=plf.device)).to(device="cpu")
+        _costs: th.Tensor = cost_est(_inps)
         _tmpl_idx: int = int(th.argmin(_costs[0]).item())
-        _fm_avail: th.Tensor = th.maximum(tmpls[_tmpl_idx] - _fm, th.as_tensor(0.0))
+        _fm_avail: th.Tensor = th.maximum(
+            tmpls[_tmpl_idx] - _fm, th.as_tensor(0.0, device=plf.device)
+        )
         if th.sum(_fm_avail) == 0:
             break
         fobsd_l.append(int(th.argmax(_fm_avail).item()))

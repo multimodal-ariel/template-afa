@@ -63,6 +63,7 @@ def make_templates_vanilla(
     bsz: int,
     plf: pl.Fabric,
 ) -> th.Tensor:
+    classifier.to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
     # NOTE init. candidate templates
@@ -88,6 +89,7 @@ def make_templates_vanilla(
         classifier=classifier,
         lmbda=lmbda,
         bsz=bsz,
+        plf=plf,
     )
     tmpls, slctd_ms = make_templates_from_candidates(
         tpcomp=tpcomp,
@@ -122,6 +124,7 @@ def make_templates_reduce_features(
     bsz: int,
     plf: pl.Fabric,
 ) -> th.Tensor:
+    classifier.to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features_targ = n_covs if max_features_targ is None else max_features_targ
     ctmpls: th.Tensor | None = None
@@ -176,6 +179,7 @@ def make_templates_reduce_features(
             classifier=classifier,
             lmbda=lmbda,
             bsz=bsz,
+            plf=plf,
         )
         tmpls, slctd_ms = make_templates_from_candidates(
             tpcomp=tpcomp,
@@ -211,6 +215,7 @@ def make_templates_fix_rounds(
     bsz: int,
     plf: pl.Fabric,
 ) -> th.Tensor:
+    classifier.eval().to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
     ctmpls: th.Tensor | None = None
@@ -255,6 +260,7 @@ def make_templates_fix_rounds(
             classifier=classifier,
             lmbda=lmbda,
             bsz=bsz,
+            plf=plf,
         )
         tmpls, slctd_ms = make_templates_from_candidates(
             tpcomp=tpcomp,
@@ -289,6 +295,7 @@ def make_templates_fix_rounds_minibatch(
     minibatch_size: int,
     plf: pl.Fabric,
 ) -> th.Tensor:
+    classifier.eval().to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
     ctmpls: th.Tensor | None = None
@@ -367,6 +374,7 @@ def make_templates_fix_rounds_minibatch(
                             classifier=classifier,
                             lmbda=lmbda,
                             bsz=bsz,
+                            plf=plf,
                         ),
                         ctmpls=_ctmpls,
                         n_tmpls=n_tmpls_targ,
@@ -391,6 +399,7 @@ def make_templates_fix_rounds_minibatch(
             classifier=classifier,
             lmbda=lmbda,
             bsz=bsz,
+            plf=plf,
         )
         tmpls, slctd_ms = make_templates_from_candidates(
             tpcomp=tpcomp,
@@ -423,6 +432,7 @@ def make_templates_fix_rounds_nearest_neighbors(
     bsz: int,
     plf: pl.Fabric,
 ) -> th.Tensor:
+    classifier.eval().to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
     ctmpls: th.Tensor | None = None
@@ -463,11 +473,7 @@ def make_templates_fix_rounds_nearest_neighbors(
             else tdata
         )
         tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
-            ctmpls,
-            data=_tdata,
-            classifier=classifier,
-            lmbda=lmbda,
-            bsz=bsz,
+            ctmpls, data=_tdata, classifier=classifier, lmbda=lmbda, bsz=bsz, plf=plf
         )
         tpcomp["knnidxs"] = th.empty(
             (len(_tdata), n_neighs, len(ctmpls)), dtype=th.long
