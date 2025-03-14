@@ -411,7 +411,13 @@ def main(cfg: MainConf):
         ys_train=extdata["ys"].numpy(),
     )
     if isinstance(tclassifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
-        tclassifier.fit_(tmpls)
+        tclassifier_p = os.path.join(
+            mylib.utils.get_project_root_dir(), mktmpl_run_dir, "tclassifier.pt"
+        )
+        if os.path.exists(tclassifier_p):
+            tclassifier.load_state_dict(th.load(tclassifier_p, map_location="cpu"))
+        else:
+            tclassifier.fit_(tmpls)
     vclassifier: mymodels.classifiers.SubsetFeatureClassifier = tclassifier
     if mktmpl_cfg.vclassifier is not None:
         vclassifier = hd.utils.instantiate(
@@ -420,7 +426,13 @@ def main(cfg: MainConf):
             ys_train=extdata["ys"].numpy(),
         )
         if isinstance(vclassifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
-            vclassifier.fit_(tmpls)  # configure logger and ckpt path
+            vclassifier_p = os.path.join(
+                mylib.utils.get_project_root_dir(), mktmpl_run_dir, "tclassifier.pt"
+            )
+            if os.path.exists(vclassifier_p):
+                vclassifier.load_state_dict(th.load(vclassifier_p, map_location="cpu"))
+            else:
+                vclassifier.fit_(tmpls)
     os.makedirs(output_dir, exist_ok=True)
     tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
     csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
