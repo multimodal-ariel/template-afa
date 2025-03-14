@@ -98,8 +98,12 @@ def main(cfg: MainConf):
         bsz=cfg.bsz,
         plf=plf,
     )
+    # save templates
     th.save(_tdata_shuffle_idxs, os.path.join(output_dir, "tdata_shuffle_idxs.pt"))
     th.save(tmpls, os.path.join(output_dir, "tmpls.pt"))
+    # save training classifier
+    if len(tclassifier.state_dict()) != 0:
+        th.save(tclassifier.state_dict(), os.path.join(output_dir, "tclassifier.pt"))
     # evaluate validation set performance
     tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
         tmpls=tmpls,
@@ -128,6 +132,11 @@ def main(cfg: MainConf):
         plf=plf,
     )
     plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "eval"))
+    # save validation time classifier
+    # if it's neither the one used in training time
+    # nor has empty state_dict
+    if vclassifier is not tclassifier and len(vclassifier.state_dict()) != 0:
+        th.save(vclassifier.state_dict(), os.path.join(output_dir, "vclassifier.pt"))
     # logger flush record and close
     tfb_logger.finalize("success")
     csv_logger.finalize("success")
