@@ -1,25 +1,23 @@
 from __future__ import annotations
 
+import logging
 import os
+import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, TypedDict
 
-import _tmplfns
 import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
-import mylib.utils
-import mymodels.classifiers
-import mymodels.nn
-import mymodels.protocols
+import mylib
+import mymodels
+import tafalib
 import tensordict as thd
 import torch as th
 import torchmetrics as thm
 import tqdm.auto as tqdm
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
-
-PROJ_ROOT: str = "../../../"
 
 
 @dataclass
@@ -58,31 +56,6 @@ class _TrainState(TypedDict):
     nnet: th.nn.Module
     opt: th.optim.Optimizer
     opt_step: int
-
-
-@th.no_grad()
-def nnet_cost_est(
-    inps: th.Tensor,
-    nnet: th.nn.Module,
-    lmbda: float,
-    tmpls: th.Tensor,
-    device: th.device,
-) -> th.Tensor:
-    n_covs: int = tmpls.shape[1]
-    nnet.eval().to(device=device)
-    # (n_tmpls, n_covs)
-    tmpls = tmpls.to(device=device)
-    # (n, n_covs)
-    inps = inps.to(device=device)
-    fms: th.Tensor = inps[:, n_covs:]
-    # (n, n_tmpls)
-    cels: th.Tensor = nnet(inps)
-    # (n, n_tmpls, n_covs)
-    fms_avail: th.Tensor = th.maximum(
-        tmpls[None, :, :] - fms[:, None, :], th.as_tensor(0.0, device=device)
-    )
-    costs: th.Tensor = cels + lmbda * th.sum(fms_avail, dim=2)
-    return costs
 
 
 @th.no_grad()
@@ -213,7 +186,7 @@ def _tmplafa_predict(
     fms: th.Tensor = th.zeros_like(data["xs"])
     fobsds_l: list[list[int]] = list()
     for _i, _data in enumerate(data):
-        _pyhat, _fobsd_l, _fcomb = _tmplfns.run_one_episode(
+        _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
             x=_data["xs"],
             classifier=classifier,
             cost_est=cost_est,
@@ -268,7 +241,7 @@ def _dagger_fit_iter_nnet_regressor(
     _, _, _, bfobsds_l = _tmplafa_predict(
         data=bstdata,
         classifier=classifier,
-        cost_est=lambda x: nnet_cost_est(
+        cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
             x, nnet=nnet, lmbda=lmbda, tmpls=tmpls, device=plf.device
         ),
         init_fidx=init_fidx,
@@ -364,10 +337,10 @@ def dagger_fit_nnet_regressor(
             _itr % eval_every_n_iter == 0 or (_itr + 1) == n_iter
         ):
             vclassifier = classifier if vclassifier is None else vclassifier
-            vmetrics_d: dict[str, float] = _tmplfns.evaluate(
+            vmetrics_d: dict[str, float] = tafalib.utils.evaluate(
                 data=vdata,
                 classifier=vclassifier,
-                cost_est=lambda x: nnet_cost_est(
+                cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
                     x,
                     nnet=tstate["nnet"],
                     lmbda=lmbda,
@@ -394,7 +367,6 @@ def _get_mktmpl_run_dir(cfg: MainConf) -> str:
     return os.path.join(cfg.mktmpl_exp.exp_p, str(cfg.mktmpl_exp.run_id))
 
 
-@hd.main(version_base=None)
 def main(cfg: MainConf):
     # _delay_import()
     output_dir: str = HydraConfig.get().runtime.output_dir
@@ -402,13 +374,17 @@ def main(cfg: MainConf):
     mktmpl_run_dir: str = _get_mktmpl_run_dir(cfg)
     # load saved result from make_templates
     tmpls: th.Tensor = th.load(
-        os.path.join(PROJ_ROOT, mktmpl_run_dir, "tmpls.pt"), weights_only=False
+        os.path.join(mylib.utils.get_project_root_dir(), mktmpl_run_dir, "tmpls.pt"),
+        weights_only=False,
     )
     tpcomp: thd.TensorDict = th.load(
-        os.path.join(PROJ_ROOT, mktmpl_run_dir, "tpcomp.pt"), weights_only=False
+        os.path.join(mylib.utils.get_project_root_dir(), mktmpl_run_dir, "tpcomp.pt"),
+        weights_only=False,
     )
     mktmpl_cfg = OmegaConf.load(
-        os.path.join(PROJ_ROOT, mktmpl_run_dir, ".hydra", "config.yaml")
+        os.path.join(
+            mylib.utils.get_project_root_dir(), mktmpl_run_dir, ".hydra", "config.yaml"
+        )
     )
     OmegaConf.save(mktmpl_cfg, os.path.join(output_dir, ".hydra", "mktmpl_config.yaml"))
     # make dataset
@@ -420,7 +396,9 @@ def main(cfg: MainConf):
     n_labels: int = len(th.unique(_tdata["ys"]))
     # split training data into two for classifier and afa
     _tdata_shuffle_idxs: th.Tensor = th.load(
-        os.path.join(PROJ_ROOT, mktmpl_run_dir, "tdata_shuffle_idxs.pt")
+        os.path.join(
+            mylib.utils.get_project_root_dir(), mktmpl_run_dir, "tdata_shuffle_idxs.pt"
+        )
     )
     tdata: thd.TensorDict
     extdata: thd.TensorDict
@@ -481,10 +459,10 @@ def main(cfg: MainConf):
     )
     plf.save(os.path.join(ckpt_p, "warmup_end.pt"), tstate)
     # evaluate validation set performance with nnet after warmup
-    metrics_d = _tmplfns.evaluate(
+    metrics_d = tafalib.utils.evaluate(
         data=vdata,
         classifier=vclassifier,
-        cost_est=lambda x: nnet_cost_est(
+        cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
             x, nnet=nnet, lmbda=mktmpl_cfg.lmbda, tmpls=tmpls, device=plf.device
         ),
         init_fidx=mktmpl_cfg.init_fidx,
@@ -512,10 +490,10 @@ def main(cfg: MainConf):
     )
     plf.save(os.path.join(ckpt_p, "dagger_end.pt"), tstate)
     # evaluate validation set performance with nnet after dagger finetune
-    metrics_d = _tmplfns.evaluate(
+    metrics_d = tafalib.utils.evaluate(
         data=vdata,
         classifier=vclassifier,
-        cost_est=lambda x: nnet_cost_est(
+        cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
             x, nnet=nnet, lmbda=mktmpl_cfg.lmbda, tmpls=tmpls, device=plf.device
         ),
         init_fidx=mktmpl_cfg.init_fidx,
@@ -530,4 +508,15 @@ def main(cfg: MainConf):
 
 
 if __name__ == "__main__":
-    main()
+
+    @hd.main(version_base=None)
+    def _main(cfg: MainConf):
+        logger = logging.getLogger(HydraConfig.get().job.name)
+        try:
+            main(cfg)
+        except Exception as e:
+            logger.error(e, exc_info=True, stack_info=True)
+            traceback.print_exception(e)
+            raise e
+
+    _main()
