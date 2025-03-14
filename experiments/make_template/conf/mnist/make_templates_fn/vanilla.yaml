@@ -1,4 +1,4 @@
-_target_: tafalib.makers.make_templates_vanilla
+_target_: tafalib.makers.templates.make_templates_vanilla
 max_tdata: 6000
 n_tmpls: 1024
 n_cands: 20_000

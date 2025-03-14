@@ -1,4 +1,4 @@
-_target_: tafalib.makers.make_templates_fix_rounds
+_target_: tafalib.makers.templates.make_templates_fix_rounds
 max_tdata: 30_000
 n_tmpls_targ: 128
 n_cands_init: 10_000
