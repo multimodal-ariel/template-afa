@@ -98,7 +98,7 @@ tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
 
 # %%
-plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="cpu")
+plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
 
 # %%
 if init_fidx is None:
