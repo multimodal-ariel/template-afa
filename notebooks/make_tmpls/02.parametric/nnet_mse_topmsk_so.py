@@ -5,46 +5,18 @@ import os
 from typing import Optional, TypedDict
 
 import _classifiers
-import _tmplfns
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
-import mydatasets.aaco
-import mylib.utils
-import mymodels.classifiers
-import mymodels.nn
-import mymodels.protocols
+import mydatasets
+import mylib
+import mymodels
 import pandas as pd
+import tafalib
 import tensordict as thd
 import torch as th
 import torch.utils.data as th_data
 import torchmetrics as thm
 import tqdm.auto as tqdm
-
-
-# %%
-@th.no_grad()
-def nnet_cost_est(
-    inps: th.Tensor,
-    nnet: th.nn.Module,
-    lmbda: float,
-    tmpls: th.Tensor,
-    device: th.device,
-) -> th.Tensor:
-    n_covs: int = tmpls.shape[1]
-    nnet.eval().to(device=device)
-    # (n_tmpls, n_covs)
-    tmpls = tmpls.to(device=device)
-    # (n, n_covs)
-    inps = inps.to(device=device)
-    fms: th.Tensor = inps[:, n_covs:]
-    # (n, n_tmpls)
-    cels: th.Tensor = nnet(inps)
-    # (n, n_tmpls, n_covs)
-    fms_avail: th.Tensor = th.maximum(
-        tmpls[None, :, :] - fms[:, None, :], th.as_tensor(0.0, device=device)
-    )
-    costs: th.Tensor = cels + lmbda * th.sum(fms_avail, dim=2)
-    return costs
 
 
 # %%
@@ -247,7 +219,7 @@ max_tdata: Optional[int] = 6000
 _tdata_shuffle_idxs = th.randperm(len(_tdata))
 tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
 extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
-tclassifier = _classifiers.SubsetFeatureConcatXGBClassifier(
+tclassifier = mymodels.classifiers.SubsetFeatureConcatXGBClassifier(
     xs_train=extdata["xs"].numpy(),
     ys_train=extdata["ys"].numpy(),
     xgb_kwargs={"n_estimators": 40},
@@ -295,7 +267,7 @@ plf_nnet = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
 
 # %%
 if init_fidx is None:
-    init_fidx, bestfm = _tmplfns.identify_init_fidx(
+    init_fidx, bestfm = tafalib.makers.templates.identify_init_fidx(
         tdata=tdata,
         classifier=tclassifier,
         max_features=max_features_targ,
@@ -306,7 +278,7 @@ if init_fidx is None:
     )
 
 # %%
-tmpls: th.Tensor = _tmplfns.make_templates_fix_rounds(
+tmpls: th.Tensor = tafalib.makers.templates.make_templates_fix_rounds(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
@@ -324,8 +296,8 @@ tmpls: th.Tensor = _tmplfns.make_templates_fix_rounds(
 )
 
 # %%
-tpcomp: thd.TensorDict = _tmplfns.precomp_rwds_for_tmpls(
-    tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz
+tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz, plf=plf_tmpl
 )
 
 # %%
@@ -358,10 +330,10 @@ metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
 for _data in vdata:
-    _pyhat, _fobsd_l, _fcomb = _tmplfns.run_one_episode_all_obsd(
+    _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
         x=_data["xs"],
         classifier=vclassifier,
-        cost_est=lambda x: _tmplfns.knn_cost_est(
+        cost_est=lambda x: tafalib.functional.knn_cost_est(
             x,
             lmbda=lmbda,
             txs=tdata["xs"],
@@ -396,10 +368,10 @@ metrics_func.reset()
 snfobsd_l: list[int] = list()
 snfcomb_l: list[int] = list()
 for _data in vdata:
-    _pyhat, _fobsd_l, _fcomb = _tmplfns.run_one_episode_all_obsd(
+    _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
         x=_data["xs"],
         classifier=vclassifier,
-        cost_est=lambda x: nnet_cost_est(
+        cost_est=lambda x: tafalib.functional.single_output_nnet_cost_est(
             x, nnet=nnet, lmbda=lmbda, tmpls=tmpls, device=plf_nnet.device
         ),
         init_fidx=init_fidx,
