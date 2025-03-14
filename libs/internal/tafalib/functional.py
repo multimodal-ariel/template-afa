@@ -14,6 +14,7 @@ def knn_cost_est(
     n_neighs: int,
     p: float = 2,
     is_train: bool = False,
+    device: th.device = th.device("cpu"),
 ) -> th.Tensor:
     """use knn strategy to compute cost
 
@@ -32,7 +33,8 @@ def knn_cost_est(
     """
     # th.Tensor: (n, n_tmpls) costs of using each template
     n_covs: int = txs.shape[1]
-    device: th.device = inps.device
+    _device: th.device = inps.device
+    inps = inps.to(device=device)
     txs = txs.to(device=device)
     tcels = tcels.to(device=device)
     costs_l: list[th.Tensor] = list()
@@ -43,7 +45,9 @@ def knn_cost_est(
         _fm: th.Tensor = _inp[n_covs:]
         _fc: tuple[int, ...] = tuple(th.argwhere(_fm == 1).flatten().tolist())
         # (n_tmpls, n_covs)
-        _fm_avail: th.Tensor = th.maximum(tmpls - _fm[None, :], th.as_tensor(0.0))
+        _fm_avail: th.Tensor = th.maximum(
+            tmpls - _fm[None, :], th.as_tensor(0.0, device=device)
+        )
         # (n_neighs, )
         _knnidxs: th.Tensor = mylib.ml.knn(
             xs=_inp[None, _fc].to(device=device),
@@ -56,7 +60,7 @@ def knn_cost_est(
         _cels: th.Tensor = th.mean(tcels[_knnidxs], dim=0)
         _costs: th.Tensor = _cels + lmbda * th.sum(_fm_avail, dim=1)
         costs_l.append(_costs)
-    costs: th.Tensor = th.stack(costs_l, dim=0).to(device=device)
+    costs: th.Tensor = th.stack(costs_l, dim=0).to(device=_device)
     return costs
 
 
