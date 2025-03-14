@@ -1,12 +1,10 @@
 from __future__ import annotations
+
 import os
 
 import hydra as hd
 import mylib
-import mylib.utils
-import mymodels.classifiers
-import mymodels.nn
-import mymodels.protocols
+import mymodels
 import numpy as np
 import torch as th
 from omegaconf import OmegaConf
@@ -77,6 +75,7 @@ def make_concat_nnet_classifier_from_pretrain_run(
     xs_train: np.ndarray,
     ys_train: np.ndarray,
     fit_kwargs: mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier._FitKwargs,
+    classifier_fn: str = "classifier.pt",
 ) -> mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier:
     # try to load file from project root if run_p does not exist
     if not os.path.exists(run_p):
@@ -93,6 +92,26 @@ def make_concat_nnet_classifier_from_pretrain_run(
         xs_train=xs_train,
         ys_train=ys_train,
         fit_kwargs=fit_kwargs,
-        state_dict_p=os.path.join(run_p, "classifier.pt"),
+        state_dict_p=os.path.join(run_p, classifier_fn),
+    )
+    return classifier
+
+
+def make_concat_nnet_classifier_from_make_templates_run(
+    run_p: str,
+    xs_train: np.ndarray,
+    ys_train: np.ndarray,
+    fit_kwargs: mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier._FitKwargs,
+    classifier_fn: str = "classifier.pt",
+) -> mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier:
+    # try to load file from project root if run_p does not exist
+    if not os.path.exists(run_p):
+        run_p = os.path.join(mylib.utils.get_project_root_dir(), run_p)
+    run_cfg = OmegaConf.load(os.path.join(run_p, ".hydra", "config.yaml"))
+    classifier = make_concat_nnet_classifier_from_pretrain_run(
+        run_cfg.tclassifier.run_p, xs_train, ys_train, fit_kwargs
+    )
+    classifier.load_state_dict(
+        th.load(os.path.join(run_p, classifier_fn), map_location="cpu")
     )
     return classifier
