@@ -58,6 +58,11 @@ class _TrainState(TypedDict):
     opt_step: int
 
 
+OmegaConf.register_new_resolver(
+    name="get_cls", resolver=lambda cls: hd.utils.get_class(cls)
+)
+
+
 @th.no_grad()
 def compile_selector_dataset(
     tdata: thd.TensorDict, tpcomp: thd.TensorDict
