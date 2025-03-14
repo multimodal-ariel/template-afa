@@ -784,8 +784,8 @@ def _mutate_tmpls(
     pbar = tqdm.tqdm(
         itrtls.count(), desc="mutate tmpl_prv", dynamic_ncols=True, leave=False
     )
-    for _ in pbar:
-        if len(fcs_set) >= n_cands_targ:
+    for _c in pbar:
+        if _c >= n_cands_targ or len(fcs_set) >= n_cands_targ:
             break
         # randomly choose an existing template to mutate from
         _tmpl_prv: th.Tensor = tmpls_prv[int(th.randint(0, len(tmpls_prv), ()).item())]
