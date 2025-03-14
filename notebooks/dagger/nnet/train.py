@@ -4,14 +4,13 @@ from __future__ import annotations
 import os
 from typing import Callable, Optional, TypedDict
 
-import _tmplfns
 import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
-import mylib.utils
-import mymodels.classifiers
-import mymodels.nn
+import mylib
+import mymodels
 import pandas as pd
+import tafalib
 import tensordict as thd
 import torch as th
 import torchmetrics as thm
@@ -19,7 +18,7 @@ import tqdm.auto as tqdm
 from omegaconf import OmegaConf
 
 # %%
-PROJ_ROOT: str = "../../../"
+PROJ_ROOT: str = mylib.utils.get_project_root_dir()
 
 # %%
 # mktmpl_run_dir: str = "experiments/make_template/outputs/grid/20250305_145621/2"
@@ -66,32 +65,6 @@ if cfg.vclassifier is not None:
         xs_train=extdata["xs"].numpy(),
         ys_train=extdata["ys"].numpy(),
     )
-
-
-# %%
-@th.no_grad()
-def nnet_cost_est(
-    inps: th.Tensor,
-    nnet: th.nn.Module,
-    lmbda: float,
-    tmpls: th.Tensor,
-    device: th.device,
-) -> th.Tensor:
-    n_covs: int = tmpls.shape[1]
-    nnet.eval().to(device=device)
-    # (n_tmpls, n_covs)
-    tmpls = tmpls.to(device=device)
-    # (n, n_covs)
-    inps = inps.to(device=device)
-    fms: th.Tensor = inps[:, n_covs:]
-    # (n, n_tmpls)
-    cels: th.Tensor = nnet(inps)
-    # (n, n_tmpls, n_covs)
-    fms_avail: th.Tensor = th.maximum(
-        tmpls[None, :, :] - fms[:, None, :], th.as_tensor(0.0, device=device)
-    )
-    costs: th.Tensor = cels + lmbda * th.sum(fms_avail, dim=2)
-    return costs
 
 
 # %%
@@ -273,7 +246,7 @@ def _tmplafa_predict(
     fms: th.Tensor = th.zeros_like(data["xs"])
     fobsds_l: list[list[int]] = list()
     for _i, _data in enumerate(data):
-        _pyhat, _fobsd_l, _fcomb = _tmplfns.run_one_episode(
+        _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
             x=_data["xs"],
             classifier=classifier,
             cost_est=cost_est,
@@ -328,7 +301,7 @@ def _dagger_fit_iter_nnet_regressor(
     _, _, _, bfobsds_l = _tmplafa_predict(
         data=bstdata,
         classifier=classifier,
-        cost_est=lambda x: nnet_cost_est(
+        cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
             x, nnet=nnet, lmbda=lmbda, tmpls=tmpls, device=plf.device
         ),
         init_fidx=init_fidx,
@@ -424,10 +397,10 @@ def dagger_fit_nnet_regressor(
             _itr % eval_every_n_iter == 0 or (_itr + 1) == n_iter
         ):
             vclassifier = classifier if vclassifier is None else vclassifier
-            vmetrics_d: dict[str, float] = _tmplfns.evaluate(
+            vmetrics_d: dict[str, float] = tafalib.utils.evaluate(
                 data=vdata,
                 classifier=vclassifier,
-                cost_est=lambda x: nnet_cost_est(
+                cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
                     x,
                     nnet=tstate["nnet"],
                     lmbda=lmbda,
@@ -503,10 +476,10 @@ plf_tmpl = pl.Fabric(accelerator="cpu")
 
 # %%
 metrics_func.reset()
-metrics_d: dict[str, float] = _tmplfns.evaluate(
+metrics_d: dict[str, float] = tafalib.utils.evaluate(
     data=vdata,
     classifier=vclassifier,
-    cost_est=lambda x: _tmplfns.knn_cost_est(
+    cost_est=lambda x: tafalib.functional.knn_cost_est(
         x,
         lmbda=cfg.lmbda,
         txs=tdata["xs"],
@@ -524,10 +497,10 @@ print(pd.Series(metrics_d))
 
 # %%
 metrics_func.reset()
-metrics_d: dict[str, float] = _tmplfns.evaluate(
+metrics_d: dict[str, float] = tafalib.utils.evaluate(
     data=vdata,
     classifier=vclassifier,
-    cost_est=lambda x: nnet_cost_est(
+    cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
         x, nnet=nnet, lmbda=cfg.lmbda, tmpls=tmpls, device=plf_nnet.device
     ),
     init_fidx=cfg.init_fidx,
@@ -557,10 +530,10 @@ dagger_fit_nnet_regressor(
 
 # %%
 metrics_func.reset()
-metrics_d: dict[str, float] = _tmplfns.evaluate(
+metrics_d: dict[str, float] = tafalib.utils.evaluate(
     data=vdata,
     classifier=vclassifier,
-    cost_est=lambda x: nnet_cost_est(
+    cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
         x, nnet=nnet, lmbda=cfg.lmbda, tmpls=tmpls, device=plf_nnet.device
     ),
     init_fidx=cfg.init_fidx,
