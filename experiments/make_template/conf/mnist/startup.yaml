@@ -13,7 +13,7 @@ data:
   name: mnist
   to_normalize: true
 tclassifier:
-  _target_: _classifiers.SubsetFeatureConcatXGBClassifier
+  _target_: mymodels.classifiers.SubsetFeatureConcatXGBClassifier
   xgb_kwargs:
     n_estimators: 100
   fraction_training_data_per_split: 1.0
@@ -30,3 +30,6 @@ init_fidx: 100
 lmbda: 0.1
 n_neighs: 100
 bsz: 8
+plf:
+  _target_: lightning.Fabric
+  accelerator: cpu

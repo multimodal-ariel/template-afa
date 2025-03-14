@@ -22,3 +22,6 @@ init_fidx: 6
 lmbda: 0.3
 bsz: 1024
 n_neighs: 10
+plf:
+  _target_: lightning.Fabric
+  accelerator: cpu

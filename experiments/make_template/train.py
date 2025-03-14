@@ -4,14 +4,16 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-import _tmplfns
 import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
+import lightning.fabric.plugins.environments as plf_plugins_envs
 import mylib.utils
 import mymodels.classifiers
 import mymodels.nn
 import mymodels.protocols
+import tafalib.functional
+import tafalib.utils
 import tensordict as thd
 import torch as th
 import torchmetrics as thm
@@ -29,6 +31,7 @@ class MainConf:
     lmbda: float
     n_neighs: int
     bsz: int
+    plf: Any
 
 
 OmegaConf.register_new_resolver(
@@ -70,7 +73,10 @@ def main(cfg: MainConf):
     os.makedirs(output_dir, exist_ok=True)
     tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")
     csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")
-    plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="cpu")
+    plf: pl.Fabric = hd.utils.instantiate(cfg.plf, _partial_=True)(
+        loggers=[tfb_logger, csv_logger],
+        plugins=[plf_plugins_envs.LightningEnvironment()],
+    )
     metrics_func = thm.MetricCollection(
         {
             "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
@@ -95,14 +101,19 @@ def main(cfg: MainConf):
     th.save(_tdata_shuffle_idxs, os.path.join(output_dir, "tdata_shuffle_idxs.pt"))
     th.save(tmpls, os.path.join(output_dir, "tmpls.pt"))
     # evaluate validation set performance
-    tpcomp: thd.TensorDict = _tmplfns.precomp_rwds_for_tmpls(
-        tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=cfg.lmbda, bsz=cfg.bsz
+    tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+        tmpls=tmpls,
+        data=tdata,
+        classifier=tclassifier,
+        lmbda=cfg.lmbda,
+        bsz=cfg.bsz,
+        plf=plf,
     )
     th.save(tpcomp, os.path.join(output_dir, "tpcomp.pt"))
-    metrics_d: dict[str, float] = _tmplfns.evaluate(
+    metrics_d: dict[str, float] = tafalib.utils.evaluate(
         data=vdata,
         classifier=vclassifier,
-        cost_est=lambda x: _tmplfns.knn_cost_est(
+        cost_est=lambda x: tafalib.functional.knn_cost_est(
             x,
             lmbda=cfg.lmbda,
             txs=tdata["xs"],

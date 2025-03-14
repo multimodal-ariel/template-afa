@@ -12,7 +12,7 @@ data:
   name: big5_C_cls
   to_normalize: false
 tclassifier:
-  _target_: _classifiers.SubsetFeatureConcatXGBClassifier
+  _target_: mymodels.classifiers.SubsetFeatureConcatXGBClassifier
   xgb_kwargs:
     n_estimators: 40
   fraction_training_data_per_split: 1.0
@@ -29,3 +29,6 @@ init_fidx: 35
 lmbda: 0.075
 n_neighs: 10
 bsz: 1024
+plf:
+  _target_: lightning.Fabric
+  accelerator: cpu

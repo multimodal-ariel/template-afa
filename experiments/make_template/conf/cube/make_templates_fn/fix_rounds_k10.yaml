@@ -1,4 +1,4 @@
-_target_: _tmplfns.make_templates_fix_rounds_nearest_neighbors
+_target_: tafalib.makers.make_templates_fix_rounds_nearest_neighbors
 max_tdata: null
 n_tmpls_targ: 64
 n_cands_init: 10_000
