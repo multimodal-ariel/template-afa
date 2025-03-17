@@ -326,7 +326,7 @@ def main(cfg: MainConf):
     )
     mask_generator = load_mask_generator(dataset_name=cfg.data.name, input_dim=n_covs)
     # run aaco
-    result: thd.TensorDict = aaco_rollout(
+    results: thd.TensorDict = aaco_rollout(
         X_train=tdata["xs"],
         y_train=th.nn.functional.one_hot(tdata["ys"], num_classes=n_labels),
         X_valid=vdata["xs"],
@@ -339,9 +339,9 @@ def main(cfg: MainConf):
         is_train=False,
         n_instances=cfg.n_instances if hasattr(cfg, "n_instances") else None,
     )
-    th.save(result, os.path.join(output_dir, "results.pt"))
+    th.save(results, os.path.join(output_dir, "results.pt"))
     # forward prop. classifier
-    ridxs: th.Tensor = th.argwhere(result["Action"][:, -1] == 1).flatten()
+    ridxs: th.Tensor = th.argwhere(results["Action"][:, -1] == 1).flatten()
     # # without batch
     # inps = th.cat(
     #     [
@@ -359,9 +359,9 @@ def main(cfg: MainConf):
             classifier(
                 th.cat(
                     [
-                        result["X"][_ridxs] * result["mask"][_ridxs]
-                        - (1 - result["mask"][_ridxs]) * 10,
-                        result["mask"][_ridxs],
+                        results["X"][_ridxs] * results["mask"][_ridxs]
+                        - (1 - results["mask"][_ridxs]) * 10,
+                        results["mask"][_ridxs],
                     ],
                     dim=1,
                 ),
@@ -382,9 +382,20 @@ def main(cfg: MainConf):
         }
     )
     metrics_func.reset()
-    metrics_func.update(pyhats, th.argmax(result["y"][ridxs], dim=1))
+    metrics_func.update(pyhats, th.argmax(results["y"][ridxs], dim=1))
     metrics_d = {k: v.item() for k, v in metrics_func.compute().items()}
     metrics_func.reset()
+    # compute feature observed
+    metrics_d["feature observed"] = int(
+        th.mean(
+            th.sum(
+                results["mask"][
+                    th.argwhere(results["Action"][:, -1] == 1).flatten(), :
+                ],
+                dim=1,
+            )
+        ).item()
+    )
     # configure loggers
     tfb_logger = plf_loggers.TensorBoardLogger(output_dir, name="", version="")
     csv_logger = plf_loggers.CSVLogger(tfb_logger.log_dir, name="", version="")
