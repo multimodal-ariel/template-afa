@@ -93,7 +93,7 @@ class _TrainState(TypedDict):
     rplbuf: thrl_data.ReplayBuffer
     nnet: th.nn.Module
     opt: th.optim.Optimizer
-    n_fit_itr: int
+    fit_itr: int
     opt_step: int
 
 
@@ -175,35 +175,6 @@ def warmup_fit_nnet_selector(
     return tstate
 
 
-def _tmplafa_predict(
-    data: thd.TensorDict,
-    classifier: mymodels.classifiers.SubsetFeatureClassifier,
-    cost_est: Callable[[th.Tensor], th.Tensor],
-    init_fidx: int,
-    tmpls: th.Tensor,
-    plf: pl.Fabric,
-) -> tuple[th.Tensor, th.Tensor, th.Tensor, list[list[int]]]:
-    n_labels: int = classifier.n_labels
-    pyhats: th.Tensor = th.empty((len(data), n_labels), dtype=th.float32)
-    oms: th.Tensor = th.zeros_like(data["xs"])
-    fms: th.Tensor = th.zeros_like(data["xs"])
-    fobsds_l: list[list[int]] = list()
-    for _i, _data in enumerate(data):
-        _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
-            x=_data["xs"],
-            classifier=classifier,
-            cost_est=cost_est,
-            init_fidx=init_fidx,
-            tmpls=tmpls,
-            plf=plf,
-        )
-        pyhats[_i] = _pyhat
-        oms[_i, _fcomb] = 1
-        fms[_i, _fobsd_l] = 1
-        fobsds_l.append(_fobsd_l)
-    return pyhats, oms, fms, fobsds_l
-
-
 @th.no_grad()
 def _make_dagger_fit_bsinps_bstargs(
     bstdata: thd.TensorDict,
@@ -253,7 +224,7 @@ def _update_dagger_replay_buffer_(
 ):
     rplbuf: thrl_data.ReplayBuffer = tstate["rplbuf"]
     nnet: th.nn.Module = tstate["nnet"].eval().to(device=plf.device)
-    _, _, _, bfobsds_l = _tmplafa_predict(
+    _, _, _, bfobsds_l = tafalib.utils.predict(
         data=bstdata,
         classifier=classifier,
         cost_est=lambda x: tafalib.functional.selector_nnet_cost_est(
@@ -325,6 +296,7 @@ def dagger_fit_nnet_selector(
     lmbda: float,
     tmpls: th.Tensor,
     n_iter: int,
+    n_dagger_rollout: int,
     n_opt_step_per_iter: int,
     bsz: int,
     metrics_func: thm.MetricCollection,
@@ -337,7 +309,8 @@ def dagger_fit_nnet_selector(
 ):
     pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
     for _itr in pbar:
-        bstdata: thd.TensorDict = stdata[th.randint(0, len(stdata), (bsz,))].to(
+        n_rollout: int = min(n_dagger_rollout, len(stdata))
+        bstdata: thd.TensorDict = stdata[th.randint(0, len(stdata), (n_rollout,))].to(
             device=plf.device
         )
         # dataset aggregation (dagger)
@@ -529,7 +502,7 @@ tstate = _TrainState(
     ),
     nnet=nnet,
     opt=opt,
-    n_fit_itr=0,
+    fit_itr=0,
     opt_step=0,
 )
 
@@ -591,8 +564,9 @@ dagger_fit_nnet_selector(
     lmbda=mktmpl_cfg.lmbda,
     tmpls=tmpls,
     n_iter=1000,
+    n_dagger_rollout=128,
     n_opt_step_per_iter=100,
-    bsz=128,
+    bsz=1024,
     metrics_func=metrics_func,
     plf=plf,
     vdata=vdata,
