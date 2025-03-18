@@ -236,3 +236,32 @@ def evaluate(
         }
     )
     return metrics_d
+
+
+def predict(
+    data: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    cost_est: Callable[[th.Tensor], th.Tensor],
+    init_fidx: int,
+    tmpls: th.Tensor,
+    plf: pl.Fabric,
+) -> tuple[th.Tensor, th.Tensor, th.Tensor, list[list[int]]]:
+    n_labels: int = classifier.n_labels
+    pyhats: th.Tensor = th.empty((len(data), n_labels), dtype=th.float32)
+    oms: th.Tensor = th.zeros_like(data["xs"])
+    fms: th.Tensor = th.zeros_like(data["xs"])
+    fobsds_l: list[list[int]] = list()
+    for _i, _data in enumerate(data):
+        _pyhat, _fobsd_l, _fcomb = run_one_episode(
+            x=_data["xs"],
+            classifier=classifier,
+            cost_est=cost_est,
+            init_fidx=init_fidx,
+            tmpls=tmpls,
+            plf=plf,
+        )
+        pyhats[_i] = _pyhat
+        oms[_i, _fcomb] = 1
+        fms[_i, _fobsd_l] = 1
+        fobsds_l.append(_fobsd_l)
+    return pyhats, oms, fms, fobsds_l
