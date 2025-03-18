@@ -77,7 +77,7 @@ def single_output_nnet_cost_est(
     Args:
         inps (th.Tensor): (n, n_covs * 2)
         nnet (th.nn.Module): cross entropy neural net estimator
-        inps (th.Tensor): (n, n_covs * 2)
+        lmbda (float): cost penalty
         tmpls (th.Tensor): (n_tmpls, n_covs)
         device (th.device): device used to forward prop over nnet
 
@@ -122,7 +122,7 @@ def multi_output_nnet_cost_est(
     Args:
         inps (th.Tensor): (n, n_covs * 2)
         nnet (th.nn.Module): cross entropy neural net estimator
-        inps (th.Tensor): (n, n_covs * 2)
+        lmbda (float): cost penalty
         tmpls (th.Tensor): (n_tmpls, n_covs)
         device (th.device): device used to forward prop over nnet
 
