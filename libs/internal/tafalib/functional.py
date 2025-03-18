@@ -144,3 +144,25 @@ def multi_output_nnet_cost_est(
     )
     costs: th.Tensor = cels + lmbda * th.sum(fms_avail, dim=2)
     return costs
+
+
+@th.no_grad()
+def selector_nnet_cost_est(
+    inps: th.Tensor, nnet: th.nn.Module, device: th.device
+) -> th.Tensor:
+    """selector neural network cost estimator
+
+    Args:
+        inps (th.Tensor): (n, n_covs * 2)
+        nnet (th.nn.Module): cross entropy neural net estimator
+        device (th.device): device used to forward prop over nnet
+
+    Returns:
+        th.Tensor: (n, n_tmpls) costs of using each template
+    """
+    nnet.eval().to(device=device)
+    # (n, n_covs)
+    inps = inps.to(device=device)
+    # (n, n_tmpls)
+    costs: th.Tensor = -nnet(inps)
+    return costs
