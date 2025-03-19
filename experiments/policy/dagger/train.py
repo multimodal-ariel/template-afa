@@ -15,6 +15,7 @@ import tafalib
 import tensordict as thd
 import torch as th
 import torchmetrics as thm
+import torchrl.data as thrl_data
 import tqdm.auto as tqdm
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
@@ -24,8 +25,8 @@ from omegaconf import OmegaConf
 class MainConf:
     mktmpl_exp: Optional[MakeTemplateExpConf]
     mktmpl_run: Optional[str]
+    max_rplbuf_size: int
     nnet: Any
-    opt: Any
     warmup_nnet_tcfg: WarmupNeuralNetTrainConf
     dagger_nnet_tcfg: DaggerNeuralNetTrainConf
     plf: Any
@@ -39,6 +40,7 @@ class MakeTemplateExpConf:
 
 @dataclass
 class WarmupNeuralNetTrainConf:
+    opt: Any
     n_fit_iter: int
     bsz: int
     save_ckpt_every_n_iter: int
@@ -46,15 +48,20 @@ class WarmupNeuralNetTrainConf:
 
 @dataclass
 class DaggerNeuralNetTrainConf:
+    opt: Any
     n_fit_iter: int
+    n_dagger_rollout: int
+    n_opt_step_per_iter: int
     bsz: int
     eval_every_n_iter: int
     save_ckpt_every_n_iter: int
 
 
 class _TrainState(TypedDict):
+    rplbuf: thrl_data.ReplayBuffer
     nnet: th.nn.Module
     opt: th.optim.Optimizer
+    fit_itr: int
     opt_step: int
 
 
@@ -92,44 +99,59 @@ def compile_selector_dataset(
 
 
 @th.no_grad()
-def _make_warmup_fit_bsinps(
-    bstdata: thd.TensorDict, init_fidx: int, tmpls: th.Tensor
-) -> th.Tensor:
+def _make_warmup_fit_bsinps_bstargs(
+    bstdata: thd.TensorDict, init_fidx: int, lmbda: float, tmpls: th.Tensor
+) -> tuple[th.Tensor, th.Tensor]:
     bsz: int = len(bstdata)
     n_tmpls: int = len(tmpls)
     # (bsz, )
     btmplidxs: th.Tensor = th.randint(0, n_tmpls, (bsz,))
     # (bsz, n_covs)
     bxs: th.Tensor = bstdata["xs"]
-    bfms: th.Tensor = tmpls[btmplidxs].to(device=bxs.device)
+    tmpls = tmpls.to(device=bxs.device)
+    bfms: th.Tensor = tmpls[btmplidxs]
     n_covs: int = bxs.shape[1]
     # randomly drop features
-    bnms: th.Tensor = th.randint(0, 2, (bsz, n_covs), device=bxs.device)
-    bnms = th.clamp(bnms - bfms, 0.0, 1.0)
-    bnms[:, init_fidx] = 1
+    boms: th.Tensor = th.randint(0, 2, (bsz, n_covs), device=bxs.device)
+    boms = th.clamp(bfms - boms, 0.0, 1.0)
+    boms[:, init_fidx] = 1
     # (bsz, 2 * n_covs)
-    bsinps: th.Tensor = th.cat((bxs * bnms, bnms), dim=1)
-    return bsinps
+    bsinps: th.Tensor = th.cat((bxs * boms, boms), dim=1)
+    # (bsz, n_tmpls, n_covs)
+    bfms_avail: th.Tensor = th.clamp(tmpls[None, :, :] - boms[:, None, :], 0.0, 1.0)
+    # (bsz, n_tmpls)
+    bcels: th.Tensor = bstdata["cels"].to(device=bxs.device)
+    bcosts: th.Tensor = bcels + lmbda * th.sum(bfms_avail, dim=2)
+    # (bsz, )
+    bstargs: th.Tensor = th.argmin(bcosts, dim=1)
+    return bsinps, bstargs
 
 
-def _warmup_fit_iter_nnet_regressor(
+def _warmup_fit_iter_nnet_selector(
     tstate: _TrainState,
     bstdata: thd.TensorDict,
     init_fidx: int,
     tmpls: th.Tensor,
+    lmbda: float,
     plf: pl.Fabric,
 ) -> dict[str, float]:
+    rplbuf: thrl_data.ReplayBuffer = tstate["rplbuf"]
     nnet: th.nn.Module = tstate["nnet"].train().to(device=plf.device)
     opt: th.optim.Optimizer = tstate["opt"]
-    # (bsz, 2 * n_covs)
-    bsinps: th.Tensor = _make_warmup_fit_bsinps(
-        bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls
+    # (bsz, 2 * n_covs) (bsz, )
+    bsinps, bstargs = _make_warmup_fit_bsinps_bstargs(
+        bstdata=bstdata, init_fidx=init_fidx, lmbda=lmbda, tmpls=tmpls
+    )
+    rplbuf.extend(
+        thd.make_tensordict(
+            {"inps": bsinps.to(device="cpu"), "targs": bstargs.to(device="cpu")}
+        ).auto_batch_size_(1)
     )
     # (bsz, n_tmpls)
     bsouts: th.Tensor = nnet(bsinps)
     # compute selector loss
-    bslosses: th.Tensor = th.nn.functional.mse_loss(
-        bsouts, bstdata["cels"], reduction="none"
+    bslosses: th.Tensor = th.nn.functional.cross_entropy(
+        bsouts, bstargs, reduction="none"
     )
     bsloss: th.Tensor = th.mean(bslosses)
     # update selector parameter
@@ -144,10 +166,11 @@ def _warmup_fit_iter_nnet_regressor(
     return bmetrics_d
 
 
-def warmup_fit_nnet_regressor(
+def warmup_fit_nnet_selector(
     tstate: _TrainState,
     stdata: thd.TensorDict,
     init_fidx: int,
+    lmbda: float,
     tmpls: th.Tensor,
     n_iter: int,
     bsz: int,
@@ -161,8 +184,13 @@ def warmup_fit_nnet_regressor(
             device=plf.device
         )
         # track metrics
-        bmetrics_d: dict[str, float] = _warmup_fit_iter_nnet_regressor(
-            tstate=tstate, bstdata=bstdata, init_fidx=init_fidx, tmpls=tmpls, plf=plf
+        bmetrics_d: dict[str, float] = _warmup_fit_iter_nnet_selector(
+            tstate=tstate,
+            bstdata=bstdata,
+            init_fidx=init_fidx,
+            lmbda=lmbda,
+            tmpls=tmpls,
+            plf=plf,
         )
         pbar.set_postfix(bmetrics_d)
         plf.log_dict(
@@ -177,61 +205,45 @@ def warmup_fit_nnet_regressor(
     return tstate
 
 
-def _tmplafa_predict(
-    data: thd.TensorDict,
-    classifier: mymodels.classifiers.SubsetFeatureClassifier,
-    cost_est: Callable[[th.Tensor], th.Tensor],
+@th.no_grad()
+def _make_dagger_fit_bsinps_bstargs(
+    bstdata: thd.TensorDict,
+    bfobsds_l: list[list[int]],
     init_fidx: int,
+    lmbda: float,
     tmpls: th.Tensor,
-    plf: pl.Fabric,
-) -> tuple[th.Tensor, th.Tensor, th.Tensor, list[list[int]]]:
-    n_labels: int = classifier.n_labels
-    pyhats: th.Tensor = th.empty((len(data), n_labels), dtype=th.float32)
-    oms: th.Tensor = th.zeros_like(data["xs"])
-    fms: th.Tensor = th.zeros_like(data["xs"])
-    fobsds_l: list[list[int]] = list()
-    for _i, _data in enumerate(data):
-        _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
-            x=_data["xs"],
-            classifier=classifier,
-            cost_est=cost_est,
-            init_fidx=init_fidx,
-            tmpls=tmpls,
-            plf=plf,
-        )
-        pyhats[_i] = _pyhat
-        oms[_i, _fcomb] = 1
-        fms[_i, _fobsd_l] = 1
-        fobsds_l.append(_fobsd_l)
-    return pyhats, oms, fms, fobsds_l
+) -> tuple[list[th.Tensor], list[th.Tensor]]:
+    # (bsz, n_covs)
+    bxs: th.Tensor = bstdata["xs"]
+    bcels: th.Tensor = bstdata["cels"]
+    tmpls = tmpls.to(device=bxs.device)
+    # make new masks
+    boms_l: list[th.Tensor] = list()
+    for _bidx, _fobsd_l in enumerate(bfobsds_l):
+        assert _fobsd_l[0] == init_fidx
+        _oms_l: list[th.Tensor] = list()
+        for _i in range(len(_fobsd_l)):
+            _om: th.Tensor = th.zeros_like(bxs[_bidx])
+            _om[_fobsd_l[: _i + 1]] = 1
+            _oms_l.append(_om)
+        boms_l.append(th.stack(_oms_l))
+    # make new selector inputs
+    bsinps_l: list[th.Tensor] = list()
+    bstargs_l: list[th.Tensor] = list()
+    for _bidx, _om in enumerate(boms_l):
+        _xs: th.Tensor = bxs[_bidx][None, :].expand(len(_om), -1)
+        _sinps: th.Tensor = th.cat((_xs * _om, _om), dim=1)
+        _fms_avail: th.Tensor = th.clamp(tmpls[None, :, :] - _om[:, None, :], 0.0, 1.0)
+        _cels: th.Tensor = bcels[_bidx][None, :]
+        _costs: th.Tensor = _cels + lmbda * th.sum(_fms_avail, dim=2)
+        _stargs: th.Tensor = th.argmin(_costs, dim=1)
+        bsinps_l.append(_sinps)
+        bstargs_l.append(_stargs)
+    return bsinps_l, bstargs_l
 
 
 @th.no_grad()
-def _make_dagger_fit_bsinps(
-    bstdata: thd.TensorDict, bfobsds_l: list[list[int]], init_fidx: int
-) -> list[th.Tensor]:
-    # (bsz, n_covs)
-    bxs: th.Tensor = bstdata["xs"]
-    # make new masks
-    bnms_l: list[th.Tensor] = list()
-    for _bidx, _fobsd_l in enumerate(bfobsds_l):
-        assert _fobsd_l[0] == init_fidx
-        _nms_l: list[th.Tensor] = list()
-        for _i in range(len(_fobsd_l)):
-            _nm: th.Tensor = th.zeros_like(bxs[_bidx])
-            _nm[_fobsd_l[: _i + 1]] = 1
-            _nms_l.append(_nm)
-        bnms_l.append(th.stack(_nms_l))
-    # make new selector inputs
-    bsinps_l: list[th.Tensor] = list()
-    for _bidx, _nm in enumerate(bnms_l):
-        _xs: th.Tensor = bxs[_bidx][None, :].expand(len(_nm), -1)
-        _sinps: th.Tensor = th.cat((_xs * _nm, _nm), dim=1)
-        bsinps_l.append(_sinps)
-    return bsinps_l
-
-
-def _dagger_fit_iter_nnet_regressor(
+def _update_dagger_replay_buffer_(
     tstate: _TrainState,
     bstdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -239,51 +251,60 @@ def _dagger_fit_iter_nnet_regressor(
     lmbda: float,
     tmpls: th.Tensor,
     plf: pl.Fabric,
-) -> dict[str, float]:
-    nnet: th.nn.Module = tstate["nnet"].to(device=plf.device)
-    opt: th.optim.Optimizer = tstate["opt"]
-    nnet.eval()
-    _, _, _, bfobsds_l = _tmplafa_predict(
+):
+    rplbuf: thrl_data.ReplayBuffer = tstate["rplbuf"]
+    nnet: th.nn.Module = tstate["nnet"].eval().to(device=plf.device)
+    _, _, _, bfobsds_l = tafalib.utils.predict(
         data=bstdata,
         classifier=classifier,
-        cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
-            x, nnet=nnet, lmbda=lmbda, tmpls=tmpls, device=plf.device
+        cost_est=lambda x: tafalib.functional.selector_nnet_cost_est(
+            x, nnet=nnet, device=plf.device
         ),
         init_fidx=init_fidx,
         tmpls=tmpls,
         plf=plf,
     )
     nnet.train()
-    # shape of list (bsz, )
-    # shape of tensor in the list (len(boms[_bi]), 2 * n_covs)
-    bsinps_l: list[th.Tensor] = _make_dagger_fit_bsinps(
-        bstdata=bstdata, bfobsds_l=bfobsds_l, init_fidx=init_fidx
+    # shape of list (bsz, ) (bsz, )
+    # shape of 1st tensor (len(boms[_bi]), 2 * n_covs)
+    # shape of 2nd tensor (len(boms[_bi]), )
+    bsinps_l, bstargs_l = _make_dagger_fit_bsinps_bstargs(
+        bstdata=bstdata,
+        bfobsds_l=bfobsds_l,
+        init_fidx=init_fidx,
+        lmbda=lmbda,
+        tmpls=tmpls,
     )
-    # # one experience for each datum from the batch
-    # # (bsz, 2 * n_covs)
-    # bsinps: th.Tensor = th.stack(
-    #     [sinps[th.randint(0, len(sinps), ())] for sinps in bsinps_l], dim=0
-    # )
-    # # (bsz, n_tmpls)
-    # bsouts: th.Tensor = nnet(bsinps)
-    # # compute selector loss
-    # # (bsz, )
-    # bslosses: th.Tensor = th.nn.functional.mse_loss(
-    #     bsouts, bstdata["cels"], reduction="none"
-    # )
-    # concatenate all experiences from all data
     # (sum(map(len, bsinps_l)), 2 * n_covs)
-    bsinps: th.Tensor = th.cat(bsinps_l, dim=0)
-    # (sum(map(len, bsinps_l)), n_tmpls)
+    bsinps: th.Tensor = th.cat(bsinps_l, dim=0).to(device="cpu")
+    # (sum(map(len, bstargs_l)), )
+    bstargs: th.Tensor = th.cat(bstargs_l, dim=0).to(device="cpu")
+    assert len(bsinps) == len(bstargs)
+    # (sum(map(len, bsinps_l)))
+    bdata = thd.make_tensordict({"inps": bsinps, "targs": bstargs}).auto_batch_size_(1)
+    # add bdata to replay buffer
+    rplbuf.extend(bdata)
+
+
+def _dagger_fit_iter_nnet_selector(
+    tstate: _TrainState, bsz: int, plf: pl.Fabric
+) -> dict[str, float]:
+    rplbuf: thrl_data.ReplayBuffer = tstate["rplbuf"]
+    nnet: th.nn.Module = tstate["nnet"].train().to(device=plf.device)
+    opt: th.optim.Optimizer = tstate["opt"]
+    # sample experiences from replay buffer
+    bdata = rplbuf.sample(batch_size=bsz)
+    # (bsz, 2 * n_covs)
+    bsinps: th.Tensor = bdata["inps"].to(device=plf.device)
+    # (bsz, )
+    bstargs: th.Tensor = bdata["targs"].to(device=plf.device)
+    # (bsz, n_tmpls)
     bsouts: th.Tensor = nnet(bsinps)
     # compute selector loss
-    # (sum(map(len, bsinps_l)), )
-    bstargs: th.Tensor = th.repeat_interleave(
-        bstdata["cels"],
-        th.tensor([len(sinps) for sinps in bsinps_l], device=plf.device),
-        dim=0,
+    # (bsz, )
+    bslosses: th.Tensor = th.nn.functional.cross_entropy(
+        bsouts, bstargs, reduction="none"
     )
-    bslosses: th.Tensor = th.nn.functional.mse_loss(bsouts, bstargs, reduction="none")
     bsloss: th.Tensor = th.mean(bslosses)
     # update selector parameter
     opt.zero_grad()
@@ -297,7 +318,7 @@ def _dagger_fit_iter_nnet_regressor(
     return bmetrics_d
 
 
-def dagger_fit_nnet_regressor(
+def dagger_fit_nnet_selector(
     tstate: _TrainState,
     stdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -305,6 +326,8 @@ def dagger_fit_nnet_regressor(
     lmbda: float,
     tmpls: th.Tensor,
     n_iter: int,
+    n_dagger_rollout: int,
+    n_opt_step_per_iter: int,
     bsz: int,
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
@@ -316,11 +339,12 @@ def dagger_fit_nnet_regressor(
 ):
     pbar = tqdm.trange(n_iter, dynamic_ncols=True, leave=True)
     for _itr in pbar:
-        bstdata: thd.TensorDict = stdata[th.randint(0, len(stdata), (bsz,))].to(
+        n_rollout: int = min(n_dagger_rollout, len(stdata))
+        bstdata: thd.TensorDict = stdata[th.randint(0, len(stdata), (n_rollout,))].to(
             device=plf.device
         )
-        # track metrics
-        btmetrics_d: dict[str, float] = _dagger_fit_iter_nnet_regressor(
+        # dataset aggregation (dagger)
+        _update_dagger_replay_buffer_(
             tstate=tstate,
             bstdata=bstdata,
             classifier=classifier,
@@ -329,15 +353,24 @@ def dagger_fit_nnet_regressor(
             tmpls=tmpls,
             plf=plf,
         )
-        pbar.set_postfix(btmetrics_d)
-        plf.log_dict(
-            mylib.utils.add_prefix_to_dict(btmetrics_d, "train_dagger"),
-            step=tstate["opt_step"],
-        )
+        # update nnet
+        for _ in tqdm.trange(n_opt_step_per_iter, dynamic_ncols=True, leave=False):
+            btmetrics_d: dict[str, float] = _dagger_fit_iter_nnet_selector(
+                tstate=tstate, bsz=bsz, plf=plf
+            )
+            # track metrics
+            pbar.set_postfix(btmetrics_d)
+            btmetrics_d["fit_itr"] = tstate["fit_itr"]
+            plf.log_dict(
+                mylib.utils.add_prefix_to_dict(btmetrics_d, "train_dagger"),
+                step=tstate["opt_step"],
+            )
+        # save ckpt if needed
         if ckpt_p is not None and (
             (_itr % save_ckpt_every_n_iter) == 0 or (_itr + 1) == n_iter
         ):
             plf.save(os.path.join(ckpt_p, f"dagger_itr{_itr}.pt"), tstate)
+        # rollout with validation set to test performance if needed
         if vdata is not None and (
             _itr % eval_every_n_iter == 0 or (_itr + 1) == n_iter
         ):
@@ -345,22 +378,21 @@ def dagger_fit_nnet_regressor(
             vmetrics_d: dict[str, float] = tafalib.utils.evaluate(
                 data=vdata,
                 classifier=vclassifier,
-                cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
-                    x,
-                    nnet=tstate["nnet"],
-                    lmbda=lmbda,
-                    tmpls=tmpls,
-                    device=plf.device,
+                cost_est=lambda x: tafalib.functional.selector_nnet_cost_est(
+                    x, nnet=tstate["nnet"], device=plf.device
                 ),
                 init_fidx=init_fidx,
                 tmpls=tmpls,
                 metrics_func=metrics_func,
                 plf=plf,
             )
+            vmetrics_d["fit_itr"] = tstate["fit_itr"]
             plf.log_dict(
                 mylib.utils.add_prefix_to_dict(vmetrics_d, "train_dagger"),
-                step=tstate["opt_step"],
+                step=tstate["fit_itr"],
             )
+        # update fit counter
+        tstate["fit_itr"] = tstate["fit_itr"] + 1
     pbar.close()
     return tstate
 
@@ -458,15 +490,24 @@ def main(cfg: MainConf):
     nnet: th.nn.Module = hd.utils.instantiate(
         cfg.nnet, in_features=2 * n_covs, out_features=len(tmpls)
     )
-    opt: th.optim.Optimizer = hd.utils.instantiate(cfg.opt, params=nnet.parameters())
     # preapre fitting cost estimator
-    tstate = _TrainState(nnet=nnet, opt=opt, opt_step=0)
+    tstate = _TrainState(
+        rplbuf=thrl_data.ReplayBuffer(
+            storage=thrl_data.ListStorage(max_size=cfg.max_rplbuf_size),
+            sampler=thrl_data.SamplerWithoutReplacement(),
+        ),
+        nnet=nnet,
+        opt=hd.utils.instantiate(cfg.warmup_nnet_tcfg.opt, params=nnet.parameters()),
+        fit_itr=0,
+        opt_step=0,
+    )
     stdata: thd.TensorDict = compile_selector_dataset(tdata=tdata, tpcomp=tpcomp)
     # warmup nnet cost estimator
-    warmup_fit_nnet_regressor(
+    warmup_fit_nnet_selector(
         tstate=tstate,
         stdata=stdata,
         init_fidx=mktmpl_cfg.init_fidx,
+        lmbda=mktmpl_cfg.lmbda,
         tmpls=tmpls,
         n_iter=cfg.warmup_nnet_tcfg.n_fit_iter,
         bsz=cfg.warmup_nnet_tcfg.bsz,
@@ -489,7 +530,10 @@ def main(cfg: MainConf):
     )
     plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "eval_warmup"))
     # use dagger to finetune cost estimator
-    dagger_fit_nnet_regressor(
+    tstate["opt"] = hd.utils.instantiate(
+        cfg.dagger_nnet_tcfg.opt, params=nnet.parameters()
+    )
+    dagger_fit_nnet_selector(
         tstate=tstate,
         stdata=stdata,
         classifier=tclassifier,
@@ -497,6 +541,8 @@ def main(cfg: MainConf):
         lmbda=mktmpl_cfg.lmbda,
         tmpls=tmpls,
         n_iter=cfg.dagger_nnet_tcfg.n_fit_iter,
+        n_dagger_rollout=cfg.dagger_nnet_tcfg.n_dagger_rollout,
+        n_opt_step_per_iter=cfg.dagger_nnet_tcfg.n_opt_step_per_iter,
         bsz=cfg.dagger_nnet_tcfg.bsz,
         metrics_func=metrics_func,
         plf=plf,
@@ -510,8 +556,8 @@ def main(cfg: MainConf):
     metrics_d = tafalib.utils.evaluate(
         data=vdata,
         classifier=vclassifier,
-        cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
-            x, nnet=nnet, lmbda=mktmpl_cfg.lmbda, tmpls=tmpls, device=plf.device
+        cost_est=lambda x: tafalib.functional.selector_nnet_cost_est(
+            x, nnet=nnet, device=plf.device
         ),
         init_fidx=mktmpl_cfg.init_fidx,
         tmpls=tmpls,
