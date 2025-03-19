@@ -1,0 +1,10 @@
+{
+  "n_features": 784,
+  "n_classes": 10,
+  "categorical_classes": {},
+  "shape": [
+    1,
+    28,
+    28
+  ]
+}

@@ -1,0 +1,8 @@
+{
+    "vaeac": "vlb",
+    "eddi" : ["accuracy", "-mse", "f1_score"],
+    "jafa":"reward", 
+    "random":"reward", 
+    "gsmrl":"reward",
+    "difa": "reward"
+}

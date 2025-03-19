@@ -1,0 +1,9 @@
+{
+  "n_features": 41,
+  "n_classes": 2,
+  "categorical_classes": {
+    "1": 2,
+    "3": 4
+  },
+  "shape": null
+}
