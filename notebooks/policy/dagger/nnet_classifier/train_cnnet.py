@@ -326,7 +326,7 @@ def dagger_fit_nnet_selector(
         )
         # if we want to train from scratch, then we need to re-initialize the weight
         if to_reset_nnet_after_dagger_rollout:
-            for _module in nnet.modules():
+            for _module in tstate["nnet"].modules():
                 if hasattr(_module, "reset_parameters"):
                     _module.reset_parameters()
         # update nnet

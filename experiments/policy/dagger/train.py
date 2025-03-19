@@ -49,6 +49,7 @@ class WarmupNeuralNetTrainConf:
 @dataclass
 class DaggerNeuralNetTrainConf:
     opt: Any
+    to_reset_nnet_after_dagger_rollout: bool
     n_fit_iter: int
     n_dagger_rollout: int
     n_opt_step_per_iter: int
@@ -325,6 +326,7 @@ def dagger_fit_nnet_selector(
     init_fidx: int,
     lmbda: float,
     tmpls: th.Tensor,
+    to_reset_nnet_after_dagger_rollout: bool,
     n_iter: int,
     n_dagger_rollout: int,
     n_opt_step_per_iter: int,
@@ -353,6 +355,11 @@ def dagger_fit_nnet_selector(
             tmpls=tmpls,
             plf=plf,
         )
+        # if we want to train from scratch, then we need to re-initialize the weight
+        if to_reset_nnet_after_dagger_rollout:
+            for _module in tstate["nnet"].modules():
+                if hasattr(_module, "reset_parameters"):
+                    _module.reset_parameters()  # type:ignore
         # update nnet
         for _ in tqdm.trange(n_opt_step_per_iter, dynamic_ncols=True, leave=False):
             btmetrics_d: dict[str, float] = _dagger_fit_iter_nnet_selector(
@@ -361,6 +368,7 @@ def dagger_fit_nnet_selector(
             # track metrics
             pbar.set_postfix(btmetrics_d)
             btmetrics_d["fit_itr"] = tstate["fit_itr"]
+            btmetrics_d["opt_step"] = tstate["opt_step"]
             plf.log_dict(
                 mylib.utils.add_prefix_to_dict(btmetrics_d, "train_dagger"),
                 step=tstate["opt_step"],
@@ -387,6 +395,7 @@ def dagger_fit_nnet_selector(
                 plf=plf,
             )
             vmetrics_d["fit_itr"] = tstate["fit_itr"]
+            vmetrics_d["opt_step"] = tstate["opt_step"]
             plf.log_dict(
                 mylib.utils.add_prefix_to_dict(vmetrics_d, "train_dagger"),
                 step=tstate["fit_itr"],
@@ -540,6 +549,7 @@ def main(cfg: MainConf):
         init_fidx=mktmpl_cfg.init_fidx,
         lmbda=mktmpl_cfg.lmbda,
         tmpls=tmpls,
+        to_reset_nnet_after_dagger_rollout=cfg.dagger_nnet_tcfg.to_reset_nnet_after_dagger_rollout,
         n_iter=cfg.dagger_nnet_tcfg.n_fit_iter,
         n_dagger_rollout=cfg.dagger_nnet_tcfg.n_dagger_rollout,
         n_opt_step_per_iter=cfg.dagger_nnet_tcfg.n_opt_step_per_iter,
