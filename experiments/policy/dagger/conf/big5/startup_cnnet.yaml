@@ -31,7 +31,7 @@ dagger_nnet_tcfg:
   opt:
     _target_: torch.optim.Adam
     lr: 1e-5
-  n_fit_iter: 5_000
+  n_fit_iter: 1_000
   n_dagger_rollout: 128
   n_opt_step_per_iter: 50
   bsz: 256
