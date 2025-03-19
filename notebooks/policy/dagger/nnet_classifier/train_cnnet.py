@@ -32,6 +32,14 @@ mktmpl_run_dir: str = "experiments/make_template/outputs/big5_cnnet/20250314_112
 
 
 # %%
+class _TrainState(TypedDict):
+    rplbuf: thrl_data.ReplayBuffer
+    nnet: th.nn.Module
+    opt: th.optim.Optimizer
+    fit_itr: int
+    opt_step: int
+
+
 @th.no_grad()
 def compile_selector_dataset(
     tdata: thd.TensorDict, tpcomp: thd.TensorDict
@@ -87,14 +95,6 @@ def _make_warmup_fit_bsinps_bstargs(
     # (bsz, )
     bstargs: th.Tensor = th.argmin(bcosts, dim=1)
     return bsinps, bstargs
-
-
-class _TrainState(TypedDict):
-    rplbuf: thrl_data.ReplayBuffer
-    nnet: th.nn.Module
-    opt: th.optim.Optimizer
-    fit_itr: int
-    opt_step: int
 
 
 def _warmup_fit_iter_nnet_selector(
@@ -260,7 +260,7 @@ def _dagger_fit_iter_nnet_selector(
     tstate: _TrainState, bsz: int, plf: pl.Fabric
 ) -> dict[str, float]:
     rplbuf: thrl_data.ReplayBuffer = tstate["rplbuf"]
-    nnet: th.nn.Module = tstate["nnet"].to(device=plf.device)
+    nnet: th.nn.Module = tstate["nnet"].train().to(device=plf.device)
     opt: th.optim.Optimizer = tstate["opt"]
     # sample experiences from replay buffer
     bdata = rplbuf.sample(batch_size=bsz)
@@ -295,6 +295,7 @@ def dagger_fit_nnet_selector(
     init_fidx: int,
     lmbda: float,
     tmpls: th.Tensor,
+    to_reset_nnet_after_dagger_rollout: bool,
     n_iter: int,
     n_dagger_rollout: int,
     n_opt_step_per_iter: int,
@@ -323,6 +324,11 @@ def dagger_fit_nnet_selector(
             tmpls=tmpls,
             plf=plf,
         )
+        # if we want to train from scratch, then we need to re-initialize the weight
+        if to_reset_nnet_after_dagger_rollout:
+            for _module in nnet.modules():
+                if hasattr(_module, "reset_parameters"):
+                    _module.reset_parameters()
         # update nnet
         for _ in tqdm.trange(n_opt_step_per_iter, dynamic_ncols=True, leave=False):
             btmetrics_d: dict[str, float] = _dagger_fit_iter_nnet_selector(
@@ -330,7 +336,8 @@ def dagger_fit_nnet_selector(
             )
             # track metrics
             pbar.set_postfix(btmetrics_d)
-            btmetrics_d["fit_itr"] = tstate["n_fit_itr"]
+            btmetrics_d["fit_itr"] = tstate["fit_itr"]
+            btmetrics_d["opt_step"] = tstate["opt_step"]
             plf.log_dict(
                 mylib.utils.add_prefix_to_dict(btmetrics_d, "train_dagger"),
                 step=tstate["opt_step"],
@@ -356,13 +363,14 @@ def dagger_fit_nnet_selector(
                 metrics_func=metrics_func,
                 plf=plf,
             )
-            vmetrics_d["fit_itr"] = tstate["n_fit_itr"]
+            vmetrics_d["fit_itr"] = tstate["fit_itr"]
+            vmetrics_d["opt_step"] = tstate["opt_step"]
             plf.log_dict(
                 mylib.utils.add_prefix_to_dict(vmetrics_d, "train_dagger"),
-                step=tstate["n_fit_itr"],
+                step=tstate["fit_itr"],
             )
         # update fit counter
-        tstate["n_fit_itr"] = tstate["n_fit_itr"] + 1
+        tstate["fit_itr"] = tstate["fit_itr"] + 1
     pbar.close()
     return tstate
 
@@ -563,6 +571,7 @@ dagger_fit_nnet_selector(
     init_fidx=mktmpl_cfg.init_fidx,
     lmbda=mktmpl_cfg.lmbda,
     tmpls=tmpls,
+    to_reset_nnet_after_dagger_rollout=True,
     n_iter=1000,
     n_dagger_rollout=128,
     n_opt_step_per_iter=100,
