@@ -550,6 +550,7 @@ def main(cfg: MainConf):
         vclassifier=vclassifier,
         eval_every_n_iter=cfg.dagger_nnet_tcfg.eval_every_n_iter,
         ckpt_p=ckpt_p,
+        save_ckpt_every_n_iter=cfg.dagger_nnet_tcfg.save_ckpt_every_n_iter,
     )
     plf.save(os.path.join(ckpt_p, "dagger_end.pt"), tstate)
     # evaluate validation set performance with nnet after dagger finetune
