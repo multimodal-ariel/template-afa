@@ -9,6 +9,8 @@ import numpy as np
 import torch as th
 from omegaconf import OmegaConf
 
+SubsetFeatureConcatXGBClassifier = mymodels.classifiers.SubsetFeatureConcatXGBClassifier
+
 
 class SubsetFeatureNaiveBayes(mymodels.classifiers.SubsetFeatureClassifier[None]):
     std: float
