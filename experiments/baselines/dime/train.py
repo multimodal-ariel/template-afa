@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
+import traceback
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from dimelib.utils import MaskLayer
 import hydra as hd
 import pytorch_lightning as pl
 import pytorch_lightning.callbacks as pl_callbacks
@@ -13,6 +14,7 @@ import pytorch_lightning.plugins.environments as pl_plugins_envs
 import torch as th
 import torch.utils.data as th_data
 import torchmetrics as thm
+from dimelib.utils import MaskLayer
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 
@@ -45,7 +47,6 @@ OmegaConf.register_new_resolver(
 )
 
 
-@hd.main(version_base=None)
 def main(cfg: MainConf):
     # _delay_import()
     output_dir: str = HydraConfig.get().runtime.output_dir
@@ -140,4 +141,14 @@ def main(cfg: MainConf):
 
 
 if __name__ == "__main__":
-    main()
+
+    @hd.main(version_base=None)
+    def _main(cfg: MainConf):
+        logger = logging.getLogger(HydraConfig.get().job.name)
+        try:
+            main(cfg)
+        except Exception as e:
+            logger.error(e, exc_info=True, stack_info=True)
+            traceback.print_exception(e)
+
+    _main()
