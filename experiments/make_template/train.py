@@ -150,6 +150,5 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(e, exc_info=True, stack_info=True)
             traceback.print_exception(e)
-            raise e
 
     _main()
