@@ -12,7 +12,7 @@ import torch as th
 import itertools as itrtls
 
 # %%
-exp_p: str = "experiments/baselines/aco/outputs/mnist/20250312_143945"
+exp_p: str = "experiments/baselines/aco/outputs/big5/20250313_153149"
 
 # %%
 lgr = logging.getLogger()
