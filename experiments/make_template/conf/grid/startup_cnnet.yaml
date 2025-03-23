@@ -1,0 +1,33 @@
+hydra:
+  job:
+    name: grid_cnnet
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: grid_data
+  to_normalize: true
+tclassifier:
+  _target_: _classifiers.make_concat_nnet_classifier_from_pretrain_run
+  run_p: experiments/pretrain/nnet_subset_feature_classifier/outputs/grid/20250322_222455
+  fit_kwargs:
+    opt_type: "${get_cls: torch.optim.Adam}"
+    opt_kwargs:
+      lr: 1e-3
+    n_iter: 5_000
+    bsz: 4096
+vclassifier: null
+# make_templates_fn:
+#   TODO override this
+#   _target_: ...
+init_fidx: 1
+lmbda: 0.5
+n_neighs: 10
+bsz: 1024
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
