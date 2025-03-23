@@ -47,7 +47,7 @@ dagger_nnet_tcfg:
   n_opt_step_per_iter: 25_000
   bsz: 1024
   eval_every_n_iter: 1
-  save_ckpt_every_n_iter: 5
+  save_ckpt_every_n_iter: 10
 plf:
   _target_: lightning.Fabric
   accelerator: auto
