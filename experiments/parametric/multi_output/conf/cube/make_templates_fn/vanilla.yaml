@@ -1,7 +1,0 @@
-_target_: _tmplfns.make_templates_vanilla
-max_tdata: null
-n_tmpls: 64
-n_cands: 10_000
-min_features: 1
-max_features: null
-to_update_classifier: true

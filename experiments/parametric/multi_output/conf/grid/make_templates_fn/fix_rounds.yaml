@@ -1,9 +1,0 @@
-_target_: _tmplfns.make_templates_fix_rounds
-max_tdata: null
-n_tmpls_targ: 128
-n_cands_init: 10_000
-min_features: 1
-max_features: null
-n_rounds: 3
-use_feature_importance_sampling: true
-to_update_classifier: true
