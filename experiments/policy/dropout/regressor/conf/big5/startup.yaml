@@ -1,0 +1,41 @@
+hydra:
+  job:
+    name: big5_cnnet
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+# TODO override one of these
+# mktmpl_exp:
+#   exp_p: str
+#   run_id: int
+# mktmpl_run: str
+nnet:
+  _target_: mymodels.nn.make_fcn
+  layer_specs:
+    [
+      [
+        256,
+        "${get_cls: torch.nn.BatchNorm1d}",
+        "${get_cls: torch.nn.ReLU}",
+        0.5,
+      ],
+      [
+        256,
+        "${get_cls: torch.nn.BatchNorm1d}",
+        "${get_cls: torch.nn.ReLU}",
+        0.5,
+      ],
+    ]
+nnet_tcfg:
+  opt:
+    _target_: torch.optim.Adam
+    lr: 1e-4
+  n_fit_iter: 100_000
+  bsz: 1024
+  save_ckpt_every_n_iter: 1000
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
