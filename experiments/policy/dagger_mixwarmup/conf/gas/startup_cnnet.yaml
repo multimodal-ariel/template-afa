@@ -17,8 +17,18 @@ nnet:
   _target_: mymodels.nn.make_fcn
   layer_specs:
     [
-      [128, null, "${get_cls: torch.nn.ReLU}", null],
-      [128, null, "${get_cls: torch.nn.ReLU}", null],
+      [
+        128,
+        "${get_cls: torch.nn.BatchNorm1d}",
+        "${get_cls: torch.nn.ReLU}",
+        0.5,
+      ],
+      [
+        128,
+        "${get_cls: torch.nn.BatchNorm1d}",
+        "${get_cls: torch.nn.ReLU}",
+        0.5,
+      ],
     ]
 warmup_nnet_tcfg:
   opt:
@@ -31,13 +41,13 @@ dagger_nnet_tcfg:
   opt:
     _target_: torch.optim.Adam
     lr: 1e-5
-  to_reset_nnet_after_dagger_rollout: false
-  n_fit_iter: 1_000
-  n_dagger_rollout: 128
-  n_opt_step_per_iter: 50
-  bsz: 256
-  eval_every_n_iter: 100
-  save_ckpt_every_n_iter: 500
+  to_reset_nnet_after_dagger_rollout: true
+  n_fit_iter: 30
+  n_dagger_rollout: 2048
+  n_opt_step_per_iter: 25_000
+  bsz: 1024
+  eval_every_n_iter: 1
+  save_ckpt_every_n_iter: 10
 plf:
   _target_: lightning.Fabric
   accelerator: auto
