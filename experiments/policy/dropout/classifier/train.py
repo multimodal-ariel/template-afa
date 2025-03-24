@@ -303,8 +303,8 @@ def main(cfg: MainConf):
     metrics_d = tafalib.utils.evaluate(
         data=vdata,
         classifier=vclassifier,
-        cost_est=lambda x: tafalib.functional.multi_output_nnet_cost_est(
-            x, nnet=nnet, lmbda=mktmpl_cfg.lmbda, tmpls=tmpls, device=plf.device
+        cost_est=lambda x: tafalib.functional.selector_nnet_cost_est(
+            x, nnet=nnet, device=plf.device
         ),
         init_fidx=mktmpl_cfg.init_fidx,
         tmpls=tmpls,
