@@ -2,6 +2,8 @@ _target_: tafalib.makers.templates.make_templates_fix_rounds
 max_tdata: 6_000
 n_tmpls_targ: 1024
 n_cands_init: 20_000
+n_cands_mutate: 2048
+n_cands_targ: 20_000
 min_features: 1
 max_features: null
 n_rounds: 10
