@@ -5,10 +5,8 @@ import math
 from typing import Optional
 
 import lightning as pl
-import mylib.utils
-import mymodels.classifiers
-import mymodels.nn
-import mymodels.protocols
+import mylib
+import mymodels
 import scipy.spatial as sp_spatial
 import tensordict as thd
 import torch as th
