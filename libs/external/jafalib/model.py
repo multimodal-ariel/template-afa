@@ -39,20 +39,20 @@ class MLP(th.nn.Module):
             if group_norm > 0 and cnt == 0:
                 cnt += 1
                 self.w0 = self.layers[-1].weight
-                print(self.w0.size())
+                # print(self.w0.size())
                 assert self.w0.size()[1] == input_size
             if batch_norm:
-                print("Batchnorm")
+                # print("Batchnorm")
                 self.layers.append(th.nn.BatchNorm1d(hidden_size))
             self.layers.append(th.nn.ReLU())
             if dropout:  # for classifier
-                print("Dropout!")
+                # print("Dropout!")
                 assert p > 0 and p < 1
                 self.layers.append(th.nn.Dropout(p=p))
             in_size = hidden_size
         self.layers.append(th.nn.Linear(in_size, output_size, bias=bias))
         if batch_norm:  # FIXME is it good?
-            print("Batchnorm")
+            # print("Batchnorm")
             self.layers.append(th.nn.BatchNorm1d(output_size))
         self.layers = th.nn.ModuleList(self.layers)
 
@@ -147,12 +147,12 @@ class SetEncoder(th.nn.Module):
             indices = th.arange(
                 0,
                 max_len,
-                out=th.LongTensor(max_len).unsqueeze(0),
+                out=th.LongTensor(max_len).unsqueeze(0).to(device=length.device),
                 device=length.device,
             )
             # TODO here.. cuda..
             mask = (indices < length.unsqueeze(1)).to(dtype=th.long)  # .long()
-            weight_logit[1 - mask] = -np.inf
+            weight_logit[1 - mask] = -9e10
             weight = th.nn.functional.softmax(weight_logit, dim=1)  # nonzero x max_len
             weighted = th.bmm(weight.unsqueeze(1), m)
             # batch_size x 1 x max_len
