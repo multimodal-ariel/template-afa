@@ -1,0 +1,26 @@
+hydra:
+  job:
+    name: cube
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: cube_20_0.3
+  to_normalize: false
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
+jafa_cfg:
+  pretrain: 20_000
+  dropout: true
+  batchnorm: true
+  p: 0.5
+  embedder_hidden_sizes: [32, 32]
+  clf_hidden_sizes: [32, 32]
+  policy_hidden_sizes: [32]
+  shared_dim: 16
+  n_envs: 64
+  nsteps: 4
+  normalize: true
+  embedded_dim: 16
+  lstm_size: 16
+  batch_size: 128
