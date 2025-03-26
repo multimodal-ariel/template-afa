@@ -79,8 +79,15 @@ def pretrain(model, args, run):
 
 
 # %%
+# argv = str.split('--data grid --problem difa --lr 0.0001 --policy_lr 0.0002 --policy_base_lr 1e-05 --seed 998 --imputation_model models/2987534.pt --iters 5000 --pretrain_iters 2000 --workers 2 --batch_size 512 --n_features 4 --grad_norm 10.0 --weight none'.split(
+argv = str.split(
+    "--data grid --problem difa --lr 0.0001 --policy_lr 0.0002 --policy_base_lr 1e-05 --seed 998 --iters 5000 --pretrain_iters 2000 --workers 2 --batch_size 512 --n_features 4 --grad_norm 10.0 --weight none"
+    " "
+)
+
+# %%
 # Setup project
-args = difalib.utils.parse_params()  # parse arguments
+args = difalib.utils.parse_params(argv)  # parse arguments
 device = difalib.utils.get_device(args)
 run = None
 if args.neptune:
