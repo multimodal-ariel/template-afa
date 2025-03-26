@@ -57,7 +57,7 @@ def sample(
 
     # At least one feature has to be found
     # In the initial state, stop action is not avaiable
-    initial = (1 - th.eq(available, exist)).long()
+    initial = 1 - th.eq(available, exist).long()
     ind = th.nonzero(initial.sum(dim=1) == 0).squeeze(-1)
     if len(ind) > 0:
         ind = th.stack([ind, ind.new(len(ind)).fill_(q_val.size()[-1] - 1)], dim=-1)
