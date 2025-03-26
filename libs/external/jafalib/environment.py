@@ -71,7 +71,7 @@ def binary_cross_entropy(logits, labels):
 
     if np.any(loss == np.inf):
         loss[loss == np.inf] = np.maximum(
-            logits[loss == np.inf], -logitis[loss == np.inf]
+            logits[loss == np.inf], -logits[loss == np.inf]
         )
     return loss, p
 
