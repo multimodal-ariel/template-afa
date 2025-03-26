@@ -95,21 +95,19 @@ def precomp_rwds_for_tmpls(
     )
     for _bidxs in pbar:
         # (_bsz, n_covs)
-        _bacts: th.Tensor = tmpls[_bidxs[:, 1], :]
-        _bctxs: th.Tensor = txs[_bidxs[:, 0], :] * _bacts
+        _bacts: th.Tensor = tmpls[_bidxs[:, 1], :].to(device=plf.device)
+        _bctxs: th.Tensor = txs[_bidxs[:, 0], :].to(device=plf.device) * _bacts
         # (_bsz, n_labels)
-        _bpyhats: th.Tensor = classifier.predict_proba(
-            _bctxs.to(device=plf.device), _bacts.to(device=plf.device)
-        ).to(device="cpu")
+        _bpyhats: th.Tensor = classifier.predict_proba(_bctxs, _bacts)
         # (_bsz, )
         _bcels: th.Tensor = th.nn.functional.nll_loss(
-            th.log(_bpyhats), tys[_bidxs[:, 0]], reduction="none"
+            th.log(_bpyhats), tys[_bidxs[:, 0]].to(device=plf.device), reduction="none"
         )
         _brwds: th.Tensor = -_bcels - lmbda * th.sum(_bacts, dim=1)
         # set it back to result tensor
-        pyhats[_bidxs[:, 0], _bidxs[:, 1], :] = _bpyhats
-        cels[_bidxs[:, 0], _bidxs[:, 1]] = _bcels
-        rwds[_bidxs[:, 0], _bidxs[:, 1]] = _brwds
+        pyhats[_bidxs[:, 0], _bidxs[:, 1], :] = _bpyhats.to(device="cpu")
+        cels[_bidxs[:, 0], _bidxs[:, 1]] = _bcels.to(device="cpu")
+        rwds[_bidxs[:, 0], _bidxs[:, 1]] = _brwds.to(device="cpu")
     pbar.close()
     # turn into tensordict
     tpcomp = thd.TensorDict(
