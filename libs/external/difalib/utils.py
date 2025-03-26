@@ -3,6 +3,7 @@ import json
 import os
 import random
 import subprocess
+from typing import Optional, Sequence
 
 import numpy as np
 import torch
@@ -105,7 +106,7 @@ def get_device(args):
     return device
 
 
-def parse_params():
+def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", default="demo2", help="name of the experiment")
     parser.add_argument("--project", default="arighosh/difa", help="neptune project")
@@ -174,8 +175,14 @@ def parse_params():
     parser.add_argument("--augmentation", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--use_f1_score", action="store_true")
+    return parser
 
-    params = parser.parse_args()
+
+def parse_params(
+    args: Optional[Sequence[str]] = None,
+):
+    parser: argparse.ArgumentParser = get_parser()
+    params = parser.parse_args(args)
     params.pretrain = False if params.problem in {"vaeac"} else True
     if params.weight != "none":
         # make 1/class_freq to 1/2*class_freq
