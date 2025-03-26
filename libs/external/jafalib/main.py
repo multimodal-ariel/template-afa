@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import os
 import pprint
 from time import time
@@ -8,8 +9,9 @@ from typing import Optional, Type
 
 import numpy as np
 import torch as th
+import tqdm.auto as tqdm
 from jafalib.environment import Env, multirange
-from jafalib.model import MLP, DFSNet, DuelingNet, SetEncoder
+from jafalib.model import DFSNet
 from scipy.special import expit
 from sklearn.metrics import roc_auc_score
 from torch.optim import Adam
@@ -542,22 +544,42 @@ def test(step_runner: StepRunner, env: Env, args, iter=0):
                 sigmoid[from_:to_] = done_records[8]
             offset = to_
     assert offset == n_data
-    print(args_str)
-    print("accuracy", np.mean(correct))
+    lgr = logging.Logger("jafalib.main.test")
+    lgr.info(args_str)
+    lgr.info(
+        f"accuracy {np.mean(correct)}",
+    )
     if n_classes == 2:
         auc = roc_auc_score(labels, sigmoid)
-        print("auc", auc)
-    print("n_acquired(mean)", np.mean(np.sum(acquired, 1)))
-    print("n_acquired(min)", np.amin(np.sum(acquired, 1)))
-    print("n_acquired(max)", np.amax(np.sum(acquired, 1)))
-    print("n_acquired(med)", np.median(np.sum(acquired, 1)))
-    print("picked detail", list(enumerate(np.sum(acquired, 0).astype(int))))
+        lgr.info(f"auc {auc}")
+    lgr.info(f"n_acquired(mean) {np.mean(np.sum(acquired, 1))}")
+    lgr.info(f"n_acquired(min) {np.amin(np.sum(acquired, 1))}")
+    lgr.info(f"n_acquired(max) {np.amax(np.sum(acquired, 1))}")
+    lgr.info(f"n_acquired(med) {np.median(np.sum(acquired, 1))}")
+    lgr.info(f"picked detail {list(enumerate(np.sum(acquired, 0).astype(int)))}")
     if weights_ is not None:
-        print("weight", weights.sum(axis=0) / acquired.sum(axis=0))
-    print("returns(mean)", np.mean(returns))
-    print("returns(min)", np.amin(returns))
-    print("returns(max)", np.amax(returns))
-    print("returns(med)", np.median(returns))
+        lgr.info(f"weight {weights.sum(axis=0) / acquired.sum(axis=0)}")
+    lgr.info(f"returns(mean) {np.mean(returns)}")
+    lgr.info(f"returns(min) {np.amin(returns)}")
+    lgr.info(f"returns(max) {np.amax(returns)}")
+    lgr.info(f"returns(med) {np.median(returns)}")
+
+    # print(args_str)
+    # print("accuracy", np.mean(correct))
+    # if n_classes == 2:
+    #     auc = roc_auc_score(labels, sigmoid)
+    #     print("auc", auc)
+    # print("n_acquired(mean)", np.mean(np.sum(acquired, 1)))
+    # print("n_acquired(min)", np.amin(np.sum(acquired, 1)))
+    # print("n_acquired(max)", np.amax(np.sum(acquired, 1)))
+    # print("n_acquired(med)", np.median(np.sum(acquired, 1)))
+    # print("picked detail", list(enumerate(np.sum(acquired, 0).astype(int))))
+    # if weights_ is not None:
+    #     print("weight", weights.sum(axis=0) / acquired.sum(axis=0))
+    # print("returns(mean)", np.mean(returns))
+    # print("returns(min)", np.amin(returns))
+    # print("returns(max)", np.amax(returns))
+    # print("returns(med)", np.median(returns))
 
     if n_classes > 2:
         return (
@@ -653,9 +675,11 @@ def learn(
         valinput = th.from_numpy(valinput).to(args.device)
         valtarget = valenv.data.labels
         max_val_score = 0
-        print("pretrain")
         pretrain_start = time()
-        for pre_i in range(args.pretrain):
+        pbar = tqdm.trange(
+            args.pretrain, desc="pretrain", leave=True, dynamic_ncols=True
+        )
+        for pre_i in pbar:
             env.reset(first=False)
             if args.pretrain_sample == "full":
                 step_runner.pretrain_step(
@@ -701,21 +725,33 @@ def learn(
                     if env.n_classes == 2
                     else np.mean(valtarget == vallogit.argmax(axis=1))
                 )
+                val_score = (
+                    val_score.item() if isinstance(val_score, np.ndarray) else val_score
+                )
                 # print(pre_i+1, val_score)
                 if val_score > max_val_score:
-                    print(pre_i + 1, val_score, "SAVE")
+                    # print(pre_i + 1, val_score, "SAVE")
                     step_runner.save(
                         os.path.join(args.save_path, "pretrained_best.model")
                     )
                     max_val_score = val_score
+                pbar.set_postfix({"score": val_score, "max_score": max_val_score})
                 step_runner.model.train()
+        pbar.close()
         pretrain_time = time() - pretrain_start
         step_runner.load(os.path.join(args.save_path, "pretrained_best.model"))
         env.reset()
         ###################
         # Pretraining end
         ###################
-        for update in range(1, n + 1):
+        pbar = tqdm.trange(
+            1,
+            n + 1,
+            desc="train policy",
+            leave=True,
+            dynamic_ncols=True,
+        )
+        for update in pbar:
             eps = (
                 max(args.eps_end, eps - decay) if scheduler == "linear" else decay * eps
             )
@@ -739,9 +775,10 @@ def learn(
                 step_runner.update_target()
             if update % 100 == 0 or update == n:
                 step_runner.model.eval()
-                print()
-                print(update, "/", n)
-                print("Current eps", eps)
+                pbar.set_postfix({"eps": eps})
+                # print()
+                # print(update, "/", n)
+                # print("Current eps", eps)
                 if valenv is not None:
                     valenv.reset()
                     if n_classes == 2:
@@ -756,3 +793,4 @@ def learn(
                             os.path.join(args.save_path, "trained_best.model")
                         )
                 step_runner.model.train()
+        pbar.close()
