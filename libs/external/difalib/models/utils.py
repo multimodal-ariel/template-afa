@@ -1,4 +1,5 @@
 import json
+import os
 
 import numpy as np
 import torch
@@ -71,4 +72,16 @@ def dump_json(path_, data):
 
 
 def load_data_parameters(dataset):
-    return open_json("references/info_{}.json".format(dataset))
+    import difalib
+
+    if os.path.exists(f"references/info_{dataset}.json"):
+        return open_json("references/info_{}.json".format(dataset))
+    data = difalib.models.data_utils.get_aaco_data(dataset)
+    n_covs: int = data["train"][0].shape[1]
+    n_labels: int = len(np.unique(data["train"][1]))
+    return {
+        "n_features": n_covs,
+        "n_classes": n_labels,
+        "categorical_classes": dict(),
+        "shape": None,
+    }
