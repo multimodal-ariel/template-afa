@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import os
 import pickle as pkl
-import pprint
 import random
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
@@ -17,8 +16,6 @@ import tensordict as thd
 import torch as th
 from jafalib.model import MLP, DFSNet, DuelingNet, SetEncoder
 from omegaconf import OmegaConf
-
-pp = pprint.PrettyPrinter()
 
 
 # %%
