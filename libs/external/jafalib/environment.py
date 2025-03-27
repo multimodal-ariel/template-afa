@@ -91,7 +91,7 @@ class Env(object):
 
         self.pos_weight = 1
         if self.n_classes == 2:
-            n_neg = len(np.where(data_labels == 0)[0])
+            n_neg = len(np.where(data.labels == 0)[0])
             n_pos = len(np.where(data.labels == 1))
             self.pos_weight = n_neg * 1.0 / n_pos
 
