@@ -1,0 +1,26 @@
+hydra:
+  job:
+    name: cube
+
+difa_cfg:
+  data: load_aaco_data/big5_C_cls/false
+  name: difa
+  problem: vaeac
+  hidden_dim: 256
+  embed_dim: 32
+  depth: 2
+  iters: 1000
+  batch_size: 128
+  ppo_batch_size: 128
+  dropout: .05
+  acquisition_cost: .05 # TODO: override this
+  n_features: 7
+  warmup_iters: 20
+  lr: 2e-4
+  base_lr: 1e-6
+  policy_lr: 2e04
+  policy_base_lr: 2e-4
+  latent_dim: 64
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
