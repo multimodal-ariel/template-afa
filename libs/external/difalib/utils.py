@@ -11,8 +11,6 @@ import torch.backends.cudnn as cudnn
 import yaml
 from sklearn.metrics import f1_score
 
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
 
 def log_to_neptune(logs, split, run, final=False):
     for k, v in logs.items():
