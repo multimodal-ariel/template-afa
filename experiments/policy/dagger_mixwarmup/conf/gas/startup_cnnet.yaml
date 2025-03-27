@@ -43,7 +43,7 @@ dagger_nnet_tcfg:
     lr: 1e-5
   to_reset_nnet_after_dagger_rollout: true
   n_fit_iter: 30
-  n_dagger_rollout: 2048
+  n_dagger_rollout: 1024
   n_opt_step_per_iter: 25_000
   bsz: 1024
   eval_every_n_iter: 1
