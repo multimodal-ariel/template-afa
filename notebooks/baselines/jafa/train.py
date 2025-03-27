@@ -206,7 +206,7 @@ def test_and_record(
     sorted_argskey = sorted(argsdict.keys())
     field = []
     result = {}
-    tstresults_l = list()
+    tstresults_l = dict()
     for prefix, environ in [("val", valenv), ("tr", env), ("ts", testenv)]:
         step_runner.load(os.path.join(args.save_path, "trained_best.model"))
         environ.reset()
@@ -215,7 +215,7 @@ def test_and_record(
             break
         environ.reset()
         test_result = jafalib.main.test(step_runner, environ, args)
-        tstresults_l.append(test_result)
+        tstresults_l[prefix] = test_result
         correct = test_result[1]
         acquired = test_result[2]
         returns = test_result[3]
