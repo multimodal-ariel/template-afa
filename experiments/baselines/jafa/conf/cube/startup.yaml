@@ -16,7 +16,7 @@ plf:
   accelerator: auto
 jafa_cfg:
   r_cost: -0.05 # TODO this seems to control penalty for feature(?)
-  pretrain: 3_000
+  pretrain: 10_000
   dropout: true
   batchnorm: true
   p: 0.5
@@ -29,7 +29,7 @@ jafa_cfg:
   normalize: true
   embedded_dim: 16
   lstm_size: 16
-  batch_size: 1024
+  batch_size: 2048
 # bsz: 1024
 # value_nnet:
 #   _target_: mymodels.nn.make_fcn
