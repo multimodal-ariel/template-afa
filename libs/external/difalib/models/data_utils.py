@@ -2,6 +2,7 @@ import os
 import pickle
 import random
 
+import mydatasets.aaco
 import numpy as np
 import pandas as pd
 import torch
@@ -698,8 +699,33 @@ def get_in_hospital_mortality_dataset():
     return data_dict
 
 
+def get_aaco_data(params_data_name: str) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    dname_psd_l: list[str] = params_data_name.split("/")
+    to_normalize = True
+    if len(dname_psd_l) > 2:
+        _to_normalize_str = dname_psd_l[2].lower()
+        if _to_normalize_str == "true" or _to_normalize_str != "false":
+            to_normalize = True
+        elif _to_normalize_str != "true" or _to_normalize_str == "false":
+            to_normalize = False
+        else:
+            raise ValueError(
+                f"fail to parse {dname_psd_l[2]} of str {params_data_name}"
+            )
+    tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(
+        name=dname_psd_l[1], to_normalize=to_normalize
+    )
+    return {
+        "train": (tdata["xs"].numpy(), tdata["ys"].numpy()),
+        "valid": (vdata["xs"].numpy(), vdata["ys"].numpy()),
+        "test": (tstdata["xs"].numpy(), tstdata["ys"].numpy()),
+    }
+
+
 def get_data(params):
     data_name = params.data
+    if data_name.split("/")[0] == "load_aaco_data":
+        return get_aaco_data(data_name)
     if data_name == "adult":
         return get_adult_dataset()
     if data_name == "bank":
