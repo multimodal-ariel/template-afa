@@ -10,6 +10,7 @@ plf:
   _target_: lightning.Fabric
   accelerator: auto
 jafa_cfg:
+  r_cost: -0.05 # TODO this seems to control penalty for feature(?)
   pretrain: 20_000
   dropout: true
   batchnorm: true
