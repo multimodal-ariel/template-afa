@@ -778,7 +778,7 @@ def prepare_data(model):
     dataset_classes = {}
     Dataset = dataset_classes.get(model.params.data, DefaultDataset)
     data_parameters = load_data_parameters(model.params.data)
-    if not isinstance(data_dict["train"], list):
+    if not isinstance(data_dict["train"], (list, tuple)):
         model.trainset = data_dict["train"]
         model.testset = data_dict["test"]
         model.validset = data_dict["valid"]
