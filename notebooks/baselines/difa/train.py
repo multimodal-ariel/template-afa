@@ -72,6 +72,7 @@ class DIFAMainConf:
     use_surrogate_reward: bool
     use_aux_state: bool
     use_imputation_model: bool
+    output_dir: str
 
 
 def make_default_difa_cfg() -> DIFAMainConf:
@@ -124,6 +125,7 @@ def make_default_difa_cfg() -> DIFAMainConf:
         use_surrogate_reward=False,
         use_aux_state=True,
         use_imputation_model=True,
+        output_dir="outputs",
     )
     return args
 
@@ -139,6 +141,8 @@ def override_jafa_cfg_(
             setattr(difa_args, k, getattr(jafa_cfg, k))
     if plf.device.type == "cuda":
         difa_args.cuda = plf.device.type
+    difa_args.output_dir = os.path.join(output_dir, "outputs")
+    os.makedirs(difa_args.output_dir, exist_ok=True)
     difa_args.pretrain = False if difa_args.problem in {"vaeac"} else True
     if difa_args.weight is not None:
         # make 1/class_freq to 1/2*class_freq
@@ -158,7 +162,6 @@ def override_jafa_cfg_(
         difa_args.use_surrogate_reward = False
         difa_args.use_aux_state = False
         difa_args.use_imputation_model = False
-
     if difa_args.problem == "difa":
         difa_args.use_imputation_model = True
         difa_args.use_aux_state = True
@@ -168,7 +171,6 @@ def override_jafa_cfg_(
     return difa_args
 
 
-# %%
 def pretrain(model, args, run, plf: pl.Fabric):
     best_logs, best_valid_logs, debug = {}, {}, model.params.debug
     best_pred_model = deepcopy(model.pred_model)
@@ -324,8 +326,6 @@ def difa_main(difa_cfg: DIFAMainConf, plf: pl.Fabric):
 # %%
 cfg: MainConf = OmegaConf.load("pretrain.yaml")  # type:ignore
 output_dir: str = "outputs"
-os.makedirs(output_dir, exist_ok=True)
-os.makedirs("models", exist_ok=True)
 
 # %%
 plf = pl.Fabric(accelerator="cpu")

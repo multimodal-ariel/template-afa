@@ -36,6 +36,8 @@ class Model(object):
         assign_metric(self)
 
     def save(self):
+        model_dir: str = os.path.join(self.params.output_dir, "models")
+        os.makedirs(model_dir, exist_ok=True)
         torch.save(
             {
                 "policy_state_dict": self.policy.policy.state_dict(),
@@ -44,7 +46,7 @@ class Model(object):
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "data_parameters": self.data_parameters,
             },
-            "models/{}.pt".format(self.params.name),
+            os.path.join(model_dir, f"{self.params.name}.pt"),
         )
 
     def prepare_data(self):
@@ -163,6 +165,16 @@ class Model(object):
             "reward": -acq_costs - ll_costs,
             "n_features": float(n_features.mean().detach().cpu()),
             "size": len(batch),
+            "output": (
+                output.detach().to(device="cpu")
+                if isinstance(output, torch.Tensor)
+                else output
+            ),
+            "batch": (
+                batch.detach().to(device="cpu")
+                if isinstance(batch, torch.Tensor)
+                else batch
+            ),
         }
 
     def finetune_step(self, batch, is_eval):

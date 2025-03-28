@@ -70,6 +70,7 @@ class Model(object):
         unobserved_mask = torch.ones_like(batch)
         metric_for_each_step = []
         ll_for_each_step = []
+        outs_l = list()
         for action_step in range(self.params.n_features):
             metric, action = self.select_next_feature(batch, unobserved_mask)
             unobserved_mask[torch.arange(len(batch)), action] = 0
@@ -79,6 +80,11 @@ class Model(object):
                     output = self.pred_model(state)
             else:
                 output = self.pred_model(state)
+            outs_l.append(
+                output.detach().to(device="cpu")
+                if isinstance(output, torch.Tensor)
+                else output
+            )
             loss = compute_loss(self, output, batch)
             metric = compute_metric(self, output, batch)
             metric_for_each_step.append(metric)
@@ -92,6 +98,7 @@ class Model(object):
             self.metric: metric_for_each_step[-1],
             "size": len(batch),
             "ll": ll_for_each_step,
+            "outs_l": outs_l,
         }
         for idx in range(len(metric_for_each_step)):
             output[self.metric + "_" + str(idx + 1)] = metric_for_each_step[idx]

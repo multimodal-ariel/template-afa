@@ -1,4 +1,5 @@
 from copy import deepcopy
+import os
 
 import torch
 
@@ -23,6 +24,8 @@ class Model(object):
         assign_optimizer_scheduler(self, self.params.iters)
 
     def save(self):
+        model_dir: str = os.path.join(self.params.output_dir, "models")
+        os.makedirs(model_dir, exist_ok=True)
         torch.save(
             {
                 "model_state_dict": self.pred_model.state_dict(),
@@ -30,7 +33,7 @@ class Model(object):
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "data_parameters": self.data_parameters,
             },
-            "models/{}.pt".format(self.params.name),
+            os.path.join(model_dir, f"{self.params.name}.pt"),
         )
 
     def load(self, checkpoint):
