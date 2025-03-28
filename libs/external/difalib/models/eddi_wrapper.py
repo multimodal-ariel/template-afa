@@ -24,6 +24,7 @@ class Model(object):
         self.device = device
         self.model = self.load_imputation_model()
         self.prepare_data()
+        self.params.n_features = params.n_features = self.data_parameters["n_features"]
         self.model.eval()
         self.pred_model = get_pred_network(self.params, self.data_parameters).to(
             self.device

@@ -24,6 +24,7 @@ class Model(object):
         self.device = device
         # self.env = Env(self.params)
         self.prepare_data()
+        self.params.n_features = params.n_features = self.data_parameters["n_features"]
         self.pred_model, ac_network = get_pred_policy_network(
             self.params, self.data_parameters
         )

@@ -23,6 +23,7 @@ class Model(object):
         self.params = deepcopy(params)
         self.device = device
         self.prepare_data()
+        self.params.n_features = params.n_features = self.data_parameters["n_features"]
         # self.env = Env(self.params)
         self.pred_model, ac_network = get_pred_policy_network(
             self.params, self.data_parameters
