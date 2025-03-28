@@ -5,6 +5,7 @@ import random
 import subprocess
 from typing import Optional, Sequence
 
+import mylib
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -21,7 +22,12 @@ def log_to_neptune(logs, split, run, final=False):
 
 
 def get_primary_metric(problem):
-    with open("references/metrics.json", "r") as fp:
+    with open(
+        os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "references/metrics.json")
+        ),
+        "r",
+    ) as fp:
         metrics = json.load(fp)
     return metrics.get(problem, None)
 
@@ -232,7 +238,7 @@ def set_random_seed(args):
 
 
 def set_logging_directory(args):
-    args.root = "logs/{}/".format(args.name)
+    args.root = os.path.join(args.output_dir, f"logs/{args.name}/")
     create_safe_directory(args.root)
     with open(args.root + "config.yml", "w") as outfile:
         yaml.dump(vars(args), outfile, default_flow_style=False)
