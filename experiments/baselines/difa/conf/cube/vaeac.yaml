@@ -15,8 +15,8 @@ difa_cfg:
   embed_dim: 32
   depth: 2
   iters: 1000
-  batch_size: 2048
-  ppo_batch_size: 2048
+  batch_size: 16384
+  ppo_batch_size: 16384
   dropout: .05
   acquisition_cost: .05 # TODO: override this
   warmup_iters: 20
