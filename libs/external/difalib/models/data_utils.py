@@ -799,9 +799,12 @@ def load_data(model):
     train_loader = torch.utils.data.DataLoader(
         model.trainset,
         collate_fn=train_collate_fn,
-        batch_size=model.params.batch_size,
+        batch_size=(
+            model.params.batch_size
+            if not isinstance(model.trainset, DefaultDataset)
+            else min(model.params.batch_size, len(model.trainset))
+        ),
         num_workers=model.params.workers,
-        drop_last=True,
         shuffle=True,
     )
     valid_loader = torch.utils.data.DataLoader(
