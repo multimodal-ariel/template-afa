@@ -9,7 +9,7 @@ hydra:
 
 difa_cfg:
   data: load_aaco_data/cube_20_0.3/false
-  name: difa
+  name: vaeac
   problem: vaeac
   hidden_dim: 32
   embed_dim: 32

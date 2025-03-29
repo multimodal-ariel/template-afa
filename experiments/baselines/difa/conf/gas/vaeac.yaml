@@ -9,7 +9,7 @@ hydra:
 
 difa_cfg:
   data: load_aaco_data/gas/true
-  name: difa
+  name: vaeac
   problem: vaeac
   hidden_dim: 64
   embed_dim: 64
