@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import logging
-from copy import deepcopy
-from dataclasses import asdict, dataclass
 import os
 import traceback
-from typing import Any, Literal
+from copy import deepcopy
+from dataclasses import asdict, dataclass
+from typing import Any, Literal, Optional
 
 import difalib
 import hydra as hd
 import lightning as pl
+import lightning.fabric.loggers as plf_loggers
 import mylib
 import torch as th
 import tqdm.auto as tqdm
@@ -20,6 +21,7 @@ from omegaconf import OmegaConf
 @dataclass
 class MainConf:
     difa_cfg: DIFAMainConf
+    imputation_model_cfg: Optional[ImputationModelConf]
     plf: Any
 
 
@@ -77,6 +79,12 @@ class DIFAMainConf:
     output_dir: str
 
 
+@dataclass
+class ImputationModelConf:
+    exp_p: str
+    run_id: int
+
+
 def make_default_difa_cfg() -> DIFAMainConf:
     args = DIFAMainConf(
         name="demo2",
@@ -132,9 +140,9 @@ def make_default_difa_cfg() -> DIFAMainConf:
     return args
 
 
-def override_jafa_cfg_(
+def override_difa_cfg_(
     difa_args: DIFAMainConf, jafa_cfg: Any, output_dir: str, plf: pl.Fabric
-):
+) -> DIFAMainConf:
     # copy from hydra config to jafa args
     for _k in OmegaConf.to_container(jafa_cfg).keys():
         assert hasattr(difa_args, _k), f"{_k} is an invalid jafa argument"
@@ -171,6 +179,17 @@ def override_jafa_cfg_(
         difa_args.use_imputation_model = True
         difa_args.use_aux_state = False
     return difa_args
+
+
+def configure_difa_cfg_imputation_model_(difa_args: DIFAMainConf, cfg: MainConf):
+    if (not hasattr(cfg, "imputation_model_cfg")) or cfg.imputation_model_cfg is None:
+        return difa_args
+    assert hasattr(cfg, "imputation_model_cfg") and cfg.imputation_model_cfg is not None
+    os.path.join(
+        mylib.utils.get_project_root_dir(),
+        cfg.imputation_model_cfg.exp_p,
+        str(cfg.imputation_model_cfg.run_id),
+    )
 
 
 def pretrain(model, args, run, plf: pl.Fabric):
@@ -328,11 +347,16 @@ def difa_main(difa_cfg: DIFAMainConf, plf: pl.Fabric):
 def main(cfg: MainConf):
     output_dir: str = HydraConfig.get().runtime.output_dir
     # configure difa configs
-    plf: pl.Fabric = hd.utils.instantiate(cfg.plf, _partial_=True)()
+    tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
+    csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
+    plf: pl.Fabric = hd.utils.instantiate(cfg.plf, _partial_=True)(
+        loggers=[tfb_logger, csv_logger]
+    )
     difa_args: DIFAMainConf = make_default_difa_cfg()
-    override_jafa_cfg_(
+    override_difa_cfg_(
         difa_args=difa_args, jafa_cfg=cfg.difa_cfg, output_dir=output_dir, plf=plf
     )
+    configure_difa_cfg_imputation_model_(difa_args=difa_args, cfg=cfg)
     difa_main(difa_args, plf=plf)
 
 
