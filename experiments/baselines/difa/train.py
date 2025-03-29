@@ -213,20 +213,21 @@ def pretrain(model, args, run, plf: pl.Fabric):
         )
         if is_improved:
             best_pred_model = deepcopy(model.pred_model)
+        pbar.set_postfix(train_logs)
+        plf.log_dict(
+            {
+                **mylib.utils.add_prefix_to_dict(best_logs, "pbest"),
+                **mylib.utils.add_prefix_to_dict(train_logs, "ptrain"),
+                **mylib.utils.add_prefix_to_dict(valid_logs, "pval"),
+                **mylib.utils.add_prefix_to_dict(test_logs, "ptest"),
+            },
+            step=cur_iter,
+        )
         if args.neptune:
             difalib.utils.log_to_neptune(train_logs, "ptrain", run)
             difalib.utils.log_to_neptune(test_logs, "ptest", run)
             difalib.utils.log_to_neptune(valid_logs, "pvalid", run)
             difalib.utils.log_to_neptune(best_logs, "pbest", run)
-        else:
-            _best_log = mylib.utils.add_prefix_to_dict(best_logs, "pbest")
-            _train_log = mylib.utils.add_prefix_to_dict(train_logs, "ptrain")
-            _val_log = mylib.utils.add_prefix_to_dict(valid_logs, "pval")
-            _tst_log = mylib.utils.add_prefix_to_dict(test_logs, "ptest")
-            pbar.set_postfix(_train_log)
-            plf.log_dict(
-                {**_best_log, **_train_log, **_val_log, **_tst_log}, step=cur_iter
-            )
         if debug:
             break
     pbar.close()
@@ -295,22 +296,24 @@ def difa_main(difa_cfg: DIFAMainConf, plf: pl.Fabric):
         test_logs_ = difalib.utils.agg_all_metrics(test_logs, epoch=cur_iter)
         valid_logs_ = difalib.utils.agg_all_metrics(valid_logs, epoch=cur_iter)
         is_improved = difalib.utils.update_best_logs(
-            best_logs, best_valid_logs, valid_logs, test_logs_, primary_metric
+            best_logs, best_valid_logs, valid_logs_, test_logs_, primary_metric
+        )
+        pbar.set_postfix(train_logs)
+        plf.log_dict(
+            {
+                **mylib.utils.add_prefix_to_dict(best_logs, "best"),
+                **mylib.utils.add_prefix_to_dict(train_logs, "train"),
+                **mylib.utils.add_prefix_to_dict(valid_logs_, "val"),
+                **mylib.utils.add_prefix_to_dict(test_logs_, "test"),
+                "is_improved": is_improved,
+            },
+            step=cur_iter,
         )
         if difa_cfg.neptune:
             difalib.utils.log_to_neptune(train_logs, "train", run)
             difalib.utils.log_to_neptune(test_logs_, "test", run)
             difalib.utils.log_to_neptune(valid_logs_, "valid", run)
             difalib.utils.log_to_neptune(best_logs, "best", run)
-        else:
-            _best_log = mylib.utils.add_prefix_to_dict(best_logs, "best")
-            _train_log = mylib.utils.add_prefix_to_dict(train_logs, "train")
-            _val_log = mylib.utils.add_prefix_to_dict(valid_logs_, "val")
-            _tst_log = mylib.utils.add_prefix_to_dict(test_logs_, "test")
-            pbar.set_postfix(_train_log)
-            plf.log_dict(
-                {**_best_log, **_train_log, **_val_log, **_tst_log}, step=cur_iter
-            )
         if difa_cfg.save and is_improved:
             model.save()
             th.save(
