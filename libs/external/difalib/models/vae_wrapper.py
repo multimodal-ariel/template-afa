@@ -29,7 +29,7 @@ class Model(object):
         torch.save(
             {
                 "model_state_dict": self.pred_model.state_dict(),
-                "params": self.params,
+                # "params": self.params,
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "data_parameters": self.data_parameters,
             },
