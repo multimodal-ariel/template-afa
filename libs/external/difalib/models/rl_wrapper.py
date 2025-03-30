@@ -1,3 +1,5 @@
+import argparse
+import dataclasses
 import os
 from copy import deepcopy
 
@@ -42,7 +44,9 @@ class Model(object):
     def load_imputation_model(self):
         if not os.path.exists(self.params.imputation_model):
             raise FileNotFoundError
-        checkpoint = torch.load(self.params.imputation_model, map_location=self.device)
+        checkpoint = torch.load(
+            self.params.imputation_model, map_location=self.device, weights_only=False
+        )
         model = get_imputation_model(
             checkpoint["params"], checkpoint["data_parameters"]
         ).to(self.device)
@@ -53,11 +57,14 @@ class Model(object):
     def save(self):
         model_dir: str = os.path.join(self.params.output_dir, "models")
         os.makedirs(model_dir, exist_ok=True)
+        params = self.params
+        if dataclasses.is_dataclass(self.data_parameters.__class__):
+            params = argparse.Namespace(**dataclasses.asdict(params))
         torch.save(
             {
                 "policy_state_dict": self.policy.policy.state_dict(),
                 "model_state_dict": self.pred_model.state_dict(),
-                "params": self.params,
+                "params": params,
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "data_parameters": self.data_parameters,
             },

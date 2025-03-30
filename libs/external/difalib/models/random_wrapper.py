@@ -39,7 +39,9 @@ class Model(object):
     def load_imputation_model(self):
         if not os.path.exists(self.params.imputation_model):
             raise FileNotFoundError
-        checkpoint = torch.load(self.params.imputation_model, map_location=self.device)
+        checkpoint = torch.load(
+            self.params.imputation_model, map_location=self.device, weights_only=False
+        )
         model = get_imputation_model(
             checkpoint["params"], checkpoint["data_parameters"]
         ).to(self.device)

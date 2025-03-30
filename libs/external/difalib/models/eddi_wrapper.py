@@ -36,7 +36,9 @@ class Model(object):
         self.data_parameters = prepare_data(self)
 
     def load_imputation_model(self):
-        checkpoint = torch.load(self.params.imputation_model, map_location=self.device)
+        checkpoint = torch.load(
+            self.params.imputation_model, map_location=self.device, weights_only=False
+        )
         model = get_imputation_model(
             checkpoint["params"], checkpoint["data_parameters"]
         ).to(self.device)
