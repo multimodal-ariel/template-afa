@@ -83,6 +83,7 @@ class DIFAMainConf:
 class ImputationModelConf:
     exp_p: str
     run_id: int
+    model_p: str
 
 
 def make_default_difa_cfg() -> DIFAMainConf:
@@ -185,10 +186,11 @@ def configure_difa_cfg_imputation_model_(difa_args: DIFAMainConf, cfg: MainConf)
     if (not hasattr(cfg, "imputation_model_cfg")) or cfg.imputation_model_cfg is None:
         return difa_args
     assert hasattr(cfg, "imputation_model_cfg") and cfg.imputation_model_cfg is not None
-    os.path.join(
+    difa_args.imputation_model = os.path.join(
         mylib.utils.get_project_root_dir(),
         cfg.imputation_model_cfg.exp_p,
         str(cfg.imputation_model_cfg.run_id),
+        cfg.imputation_model_cfg.model_p,
     )
 
 
