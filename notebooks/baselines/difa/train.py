@@ -1,10 +1,11 @@
 # %%
 from __future__ import annotations
 
+import argparse
 import os
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import difalib
 import lightning as pl
@@ -18,6 +19,7 @@ from omegaconf import OmegaConf
 @dataclass
 class MainConf:
     difa_cfg: DIFAMainConf
+    imputation_model_cfg: Optional[ImputationModelConf]
     plf: Any
 
 
@@ -75,6 +77,13 @@ class DIFAMainConf:
     output_dir: str
 
 
+@dataclass
+class ImputationModelConf:
+    exp_p: str
+    run_id: int
+    model_p: str
+
+
 def make_default_difa_cfg() -> DIFAMainConf:
     args = DIFAMainConf(
         name="demo2",
@@ -130,9 +139,9 @@ def make_default_difa_cfg() -> DIFAMainConf:
     return args
 
 
-def override_jafa_cfg_(
+def override_difa_cfg_(
     difa_args: DIFAMainConf, jafa_cfg: Any, output_dir: str, plf: pl.Fabric
-):
+) -> DIFAMainConf:
     # copy from hydra config to jafa args
     for _k in OmegaConf.to_container(jafa_cfg).keys():
         assert hasattr(difa_args, _k), f"{_k} is an invalid jafa argument"
@@ -169,6 +178,18 @@ def override_jafa_cfg_(
         difa_args.use_imputation_model = True
         difa_args.use_aux_state = False
     return difa_args
+
+
+def configure_difa_cfg_imputation_model_(difa_args: DIFAMainConf, cfg: MainConf):
+    if (not hasattr(cfg, "imputation_model_cfg")) or cfg.imputation_model_cfg is None:
+        return difa_args
+    assert hasattr(cfg, "imputation_model_cfg") and cfg.imputation_model_cfg is not None
+    difa_args.imputation_model = os.path.join(
+        mylib.utils.get_project_root_dir(),
+        cfg.imputation_model_cfg.exp_p,
+        str(cfg.imputation_model_cfg.run_id),
+        cfg.imputation_model_cfg.model_p,
+    )
 
 
 def pretrain(model, args, run, plf: pl.Fabric):
@@ -217,20 +238,21 @@ def pretrain(model, args, run, plf: pl.Fabric):
         )
         if is_improved:
             best_pred_model = deepcopy(model.pred_model)
+        pbar.set_postfix(train_logs)
+        plf.log_dict(
+            {
+                **mylib.utils.add_prefix_to_dict(best_logs, "pbest"),
+                **mylib.utils.add_prefix_to_dict(train_logs, "ptrain"),
+                **mylib.utils.add_prefix_to_dict(valid_logs, "pval"),
+                **mylib.utils.add_prefix_to_dict(test_logs, "ptest"),
+            },
+            step=cur_iter,
+        )
         if args.neptune:
             difalib.utils.log_to_neptune(train_logs, "ptrain", run)
             difalib.utils.log_to_neptune(test_logs, "ptest", run)
             difalib.utils.log_to_neptune(valid_logs, "pvalid", run)
             difalib.utils.log_to_neptune(best_logs, "pbest", run)
-        else:
-            _best_log = mylib.utils.add_prefix_to_dict(best_logs, "pbest")
-            _train_log = mylib.utils.add_prefix_to_dict(train_logs, "ptrain")
-            _val_log = mylib.utils.add_prefix_to_dict(valid_logs, "pval")
-            _tst_log = mylib.utils.add_prefix_to_dict(test_logs, "ptest")
-            pbar.set_postfix(_train_log)
-            plf.log_dict(
-                {**_best_log, **_train_log, **_val_log, **_tst_log}, step=cur_iter
-            )
         if debug:
             break
     pbar.close()
@@ -257,7 +279,7 @@ def pretrain(model, args, run, plf: pl.Fabric):
         model.prepare_data()
 
 
-def difa_main(difa_cfg: DIFAMainConf, plf: pl.Fabric):
+def difa_main(difa_cfg: DIFAMainConf | argparse.Namespace, plf: pl.Fabric):
     # args = difalib.utils.parse_params(argv)  # parse arguments
     # device = difalib.utils.get_device(args)
     device = plf.device
@@ -296,27 +318,33 @@ def difa_main(difa_cfg: DIFAMainConf, plf: pl.Fabric):
             valid_logs.append(model.test_step(batch))
             if debug:
                 break
-        test_logs = difalib.utils.agg_all_metrics(test_logs, epoch=cur_iter)
-        valid_logs = difalib.utils.agg_all_metrics(valid_logs, epoch=cur_iter)
+        test_logs_ = difalib.utils.agg_all_metrics(test_logs, epoch=cur_iter)
+        valid_logs_ = difalib.utils.agg_all_metrics(valid_logs, epoch=cur_iter)
         is_improved = difalib.utils.update_best_logs(
-            best_logs, best_valid_logs, valid_logs, test_logs, primary_metric
+            best_logs, best_valid_logs, valid_logs_, test_logs_, primary_metric
+        )
+        pbar.set_postfix(train_logs)
+        plf.log_dict(
+            {
+                **mylib.utils.add_prefix_to_dict(best_logs, "best"),
+                **mylib.utils.add_prefix_to_dict(train_logs, "train"),
+                **mylib.utils.add_prefix_to_dict(valid_logs_, "val"),
+                **mylib.utils.add_prefix_to_dict(test_logs_, "test"),
+                "is_improved": is_improved,
+            },
+            step=cur_iter,
         )
         if difa_cfg.neptune:
             difalib.utils.log_to_neptune(train_logs, "train", run)
-            difalib.utils.log_to_neptune(test_logs, "test", run)
-            difalib.utils.log_to_neptune(valid_logs, "valid", run)
+            difalib.utils.log_to_neptune(test_logs_, "test", run)
+            difalib.utils.log_to_neptune(valid_logs_, "valid", run)
             difalib.utils.log_to_neptune(best_logs, "best", run)
-        else:
-            _best_log = mylib.utils.add_prefix_to_dict(best_logs, "best")
-            _train_log = mylib.utils.add_prefix_to_dict(train_logs, "train")
-            _val_log = mylib.utils.add_prefix_to_dict(valid_logs, "val")
-            _tst_log = mylib.utils.add_prefix_to_dict(test_logs, "test")
-            pbar.set_postfix(_train_log)
-            plf.log_dict(
-                {**_best_log, **_train_log, **_val_log, **_tst_log}, step=cur_iter
-            )
         if difa_cfg.save and is_improved:
             model.save()
+            th.save(
+                {"test_logs": test_logs, "valid_logs": valid_logs},
+                os.path.join(difa_cfg.output_dir, f"itr_{cur_iter}.pt"),
+            )
         if debug:
             break
     pbar.close()
@@ -336,11 +364,11 @@ output_dir: str = "outputs"
 # %%
 plf = pl.Fabric(accelerator="cpu")
 difa_args: DIFAMainConf = make_default_difa_cfg()
-override_jafa_cfg_(
+override_difa_cfg_(
     difa_args=difa_args, jafa_cfg=cfg.difa_cfg, output_dir=output_dir, plf=plf
 )
 
 # %%
-difa_main(difa_args, plf=plf)
+difa_main(argparse.Namespace(**asdict(difa_args)), plf=plf)
 
 # %%

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import traceback
@@ -281,7 +282,7 @@ def pretrain(model, args, run, plf: pl.Fabric):
         model.prepare_data()
 
 
-def difa_main(difa_cfg: DIFAMainConf, plf: pl.Fabric):
+def difa_main(difa_cfg: DIFAMainConf | argparse.Namespace, plf: pl.Fabric):
     # args = difalib.utils.parse_params(argv)  # parse arguments
     # device = difalib.utils.get_device(args)
     device = plf.device
@@ -365,7 +366,7 @@ def main(cfg: MainConf):
         difa_args=difa_args, jafa_cfg=cfg.difa_cfg, output_dir=output_dir, plf=plf
     )
     configure_difa_cfg_imputation_model_(difa_args=difa_args, cfg=cfg)
-    difa_main(difa_args, plf=plf)
+    difa_main(argparse.Namespace(**asdict(difa_args)), plf=plf)
 
 
 if __name__ == "__main__":
