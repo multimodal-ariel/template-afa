@@ -205,7 +205,9 @@ def pretrain(model, args, run, plf: pl.Fabric):
         train_logs = []
         for _, batch in enumerate(train_loader):
             train_logs.append(
-                model.finetune_step(difalib.utils.to_device(batch), is_eval=False)
+                model.finetune_step(
+                    difalib.utils.to_device(batch, device=plf.device), is_eval=False
+                )
             )
             if debug:
                 break
@@ -215,13 +217,17 @@ def pretrain(model, args, run, plf: pl.Fabric):
         test_logs, valid_logs = [], []
         for batch in test_loader:
             test_logs.append(
-                model.finetune_step(difalib.utils.to_device(batch), is_eval=True)
+                model.finetune_step(
+                    difalib.utils.to_device(batch, device=plf.device), is_eval=True
+                )
             )
             if debug:
                 break
         for batch in valid_loader:
             valid_logs.append(
-                model.finetune_step(difalib.utils.to_device(batch), is_eval=True)
+                model.finetune_step(
+                    difalib.utils.to_device(batch, device=plf.device), is_eval=True
+                )
             )
             if debug:
                 break
