@@ -251,6 +251,8 @@ def create_safe_directory(path):
         pass
 
 
-def to_device(batch):
-    batch = {k: x.to(device) if torch.is_tensor(x) else x for k, x in batch.items()}
+def to_device(batch, device: torch.device):
+    batch = {
+        k: x.to(device=device) if torch.is_tensor(x) else x for k, x in batch.items()
+    }
     return batch
