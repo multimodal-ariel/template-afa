@@ -1,0 +1,17 @@
+hydra:
+  job:
+    name: cube
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: cube_20_0.3
+  to_normalize: true
+n_feats: 10  # TODO override this
+classifier:
+  _target_: xgboost.XGBClassifier
+  n_estimators: 40
