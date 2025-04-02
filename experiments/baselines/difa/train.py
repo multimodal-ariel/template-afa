@@ -143,14 +143,14 @@ def make_default_difa_cfg() -> DIFAMainConf:
 
 
 def override_difa_cfg_(
-    difa_args: DIFAMainConf, jafa_cfg: Any, output_dir: str, plf: pl.Fabric
+    difa_args: DIFAMainConf, difa_cfg: Any, output_dir: str, plf: pl.Fabric
 ) -> DIFAMainConf:
     # copy from hydra config to jafa args
-    for _k in OmegaConf.to_container(jafa_cfg).keys():
+    for _k in OmegaConf.to_container(difa_cfg).keys():
         assert hasattr(difa_args, _k), f"{_k} is an invalid jafa argument"
     for k in asdict(difa_args):
-        if hasattr(jafa_cfg, k):
-            setattr(difa_args, k, getattr(jafa_cfg, k))
+        if hasattr(difa_cfg, k):
+            setattr(difa_args, k, getattr(difa_cfg, k))
     if plf.device.type == "cuda":
         difa_args.cuda = plf.device.type
     difa_args.output_dir = os.path.join(output_dir, "outputs")
@@ -193,6 +193,16 @@ def configure_difa_cfg_imputation_model_(difa_args: DIFAMainConf, cfg: MainConf)
         str(cfg.imputation_model_cfg.run_id),
         cfg.imputation_model_cfg.model_p,
     )
+    pretrain_main_cfg: MainConf = OmegaConf.load(
+        os.path.join(
+            mylib.utils.get_project_root_dir(),
+            cfg.imputation_model_cfg.exp_p,
+            str(cfg.imputation_model_cfg.run_id),
+            ".hydra",
+            "config.yaml",
+        )
+    )  # type:ignore
+    difa_args.acquisition_cost = pretrain_main_cfg.difa_cfg.acquisition_cost
 
 
 def pretrain(model, args, run, plf: pl.Fabric):
@@ -363,7 +373,7 @@ def main(cfg: MainConf):
     )
     difa_args: DIFAMainConf = make_default_difa_cfg()
     override_difa_cfg_(
-        difa_args=difa_args, jafa_cfg=cfg.difa_cfg, output_dir=output_dir, plf=plf
+        difa_args=difa_args, difa_cfg=cfg.difa_cfg, output_dir=output_dir, plf=plf
     )
     configure_difa_cfg_imputation_model_(difa_args=difa_args, cfg=cfg)
     difa_main(argparse.Namespace(**asdict(difa_args)), plf=plf)
