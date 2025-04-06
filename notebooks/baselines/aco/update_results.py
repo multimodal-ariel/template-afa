@@ -12,7 +12,8 @@ import torch as th
 import itertools as itrtls
 
 # %%
-exp_p: str = "experiments/baselines/aco/outputs/big5/20250313_153149"
+# exp_p: str = "experiments/baselines/aco/outputs/mnist/20250323_183552"
+exp_p: str = "experiments/baselines/aco/outputs/mnist/20250312_143945"
 
 # %%
 lgr = logging.getLogger()
@@ -40,20 +41,16 @@ for run_id in itrtls.count():
         .groupby("step")
         .sum(min_count=1)
     )
-    # leave unchanged if feature observed is already included
-    if "eval_val/feature observed" in metrics_df:
-        continue
+    # # leave unchanged if feature observed is already included
+    # if "eval_val/feature observed" in metrics_df:
+    #     continue
     # compute average features used
-    metrics_df["eval_val/feature observed"] = int(
-        th.mean(
-            th.sum(
-                results["mask"][
-                    th.argwhere(results["Action"][:, -1] == 1).flatten(), :
-                ],
-                dim=1,
-            )
-        ).item()
-    )
+    metrics_df["eval_val/feature observed"] = th.mean(
+        th.sum(
+            results["mask"][th.argwhere(results["Action"][:, -1] == 1).flatten(), :],
+            dim=1,
+        )
+    ).item()
     # backup old metrics first
     shutil.copyfile(metrics_p, f"{metrics_p}.bak")
     # overwrite

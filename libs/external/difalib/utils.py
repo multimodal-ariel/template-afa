@@ -5,7 +5,6 @@ import random
 import subprocess
 from typing import Optional, Sequence
 
-import mylib
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -55,6 +54,9 @@ def agg_all_metrics(logs, epoch=None):
 
     is_size_available = "size" in logs[0]
     for k in keys:
+        if isinstance(logs[0][k], torch.Tensor) and logs[0][k].ndim > 1:
+            output[k] = torch.cat([d[k] for d in logs], dim=0)
+            continue
         # B, or B,D
         all_logs = torch.tensor([d[k] for d in logs])
         counts = torch.tensor(
