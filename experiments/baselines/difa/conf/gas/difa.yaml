@@ -1,0 +1,92 @@
+hydra:
+  job:
+    name: gas
+  sweep:
+    dir: outputs/${hydra.job.name}/difa/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+difa_cfg:
+  data: load_aaco_data/gas/true
+  name: difa
+  problem: difa
+  hidden_dim: 64
+  embed_dim: 64
+  depth: 2
+  iters: 1000
+  batch_size: 8192
+  ppo_batch_size: 8192
+  dropout: .05
+  # acquisition_cost: .05 # from imputation model
+  warmup_iters: 20
+  lr: 2e-4
+  base_lr: 1e-6
+  policy_lr: 2e04
+  policy_base_lr: 2e-4
+  latent_dim: 32
+imputation_model_cfg:
+  exp_p: experiments/baselines/difa/outputs/gas/vaeac/20250401_132216
+  # run_id: # TODO override this
+  model_p: outputs/models/vaeac.pt
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
+# plf:
+#   _target_: lightning.Fabric
+#   accelerator: auto
+# jafa_cfg:
+#   r_cost: -0.05 # TODO this seems to control penalty for feature(?)
+#   pretrain: 5_000
+#   dropout: true
+#   batchnorm: true
+#   p: 0.5
+#   embedder_hidden_sizes: [64, 64]
+#   clf_hidden_sizes: [64, 64]
+#   policy_hidden_sizes: [64]
+#   shared_dim: 32
+#   n_envs: 64
+#   nsteps: 4
+#   normalize: true
+#   embedded_dim: 32
+#   lstm_size: 32
+#   batch_size: 1024
+# bsz: 1024
+# value_nnet:
+#   _target_: mymodels.nn.make_fcn
+#   layer_specs: [
+#       [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+#       [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+#     ]
+# predictor_nnet:
+#   _target_: mymodels.nn.make_fcn
+#   layer_specs: [
+#       [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+#       [64, "${get_cls: torch.nn.ReLU}", null, 0.3], # two layers
+#     ]
+# share_weights_layer_indices: [0, 3]
+# pretrain_module_cfg:
+#   masking_module:
+#     _target_: dimelib.masking_pretrainer.MaskingPretrainModule
+#     lr: 1e-3
+#   masking_trainer:
+#     _target_: pytorch_lightning.Trainer
+#     accelerator: "auto"
+#     max_epochs: 200
+#     num_sanity_val_steps: 0
+# cmi_module_cfg:
+#   cmi_module:
+#     _target_: dimelib.cmi_estimator.CMIEstimator
+#     lr: 1e-3
+#     min_lr: 1e-6
+#     eps_decay: 0.2
+#     max_features: 10
+#     eps: 0.05
+#     eps_steps: 10
+#     patience: 5
+#   cmi_trainer:
+#     _target_: pytorch_lightning.Trainer
+#     accelerator: "auto"
+#     max_epochs: 200
+#     num_sanity_val_steps: 0
+#     precision: 16

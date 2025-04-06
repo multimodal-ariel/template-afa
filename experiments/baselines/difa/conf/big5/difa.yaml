@@ -18,7 +18,7 @@ difa_cfg:
   batch_size: 8192
   ppo_batch_size: 8192
   dropout: .05
-  acquisition_cost: .05 # TODO: override this
+  # acquisition_cost: .05 # from imputation model
   warmup_iters: 20
   lr: 2e-4
   base_lr: 1e-6
