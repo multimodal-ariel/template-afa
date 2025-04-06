@@ -333,13 +333,18 @@ def difa_main(difa_cfg: DIFAMainConf | argparse.Namespace, plf: pl.Fabric):
         is_improved = difalib.utils.update_best_logs(
             best_logs, best_valid_logs, valid_logs_, test_logs_, primary_metric
         )
-        pbar.set_postfix(train_logs)
+        to_log_dict = lambda d: {  # noqa: E731
+            _k: _v
+            for _k, _v in d.items()
+            if isinstance(_v, float) or (isinstance(_v, th.Tensor) and _v.numel() == 1)
+        }
+        pbar.set_postfix(to_log_dict(train_logs))
         plf.log_dict(
             {
-                **mylib.utils.add_prefix_to_dict(best_logs, "best"),
-                **mylib.utils.add_prefix_to_dict(train_logs, "train"),
-                **mylib.utils.add_prefix_to_dict(valid_logs_, "val"),
-                **mylib.utils.add_prefix_to_dict(test_logs_, "test"),
+                **mylib.utils.add_prefix_to_dict(to_log_dict(best_logs), "best"),
+                **mylib.utils.add_prefix_to_dict(to_log_dict(train_logs), "train"),
+                **mylib.utils.add_prefix_to_dict(to_log_dict(valid_logs_), "val"),
+                **mylib.utils.add_prefix_to_dict(to_log_dict(test_logs_), "test"),
                 "is_improved": is_improved,
             },
             step=cur_iter,
