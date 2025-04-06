@@ -1,0 +1,51 @@
+hydra:
+  job:
+    name: big5
+  sweep:
+    dir: outputs/${hydra.job.name}/difa/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+difa_cfg:
+  data: load_aaco_data/big5_C_cls/true
+  name: difa
+  problem: difa
+  hidden_dim: 256
+  embed_dim: 32
+  depth: 2
+  iters: 1000
+  batch_size: 8192
+  ppo_batch_size: 8192
+  dropout: .05
+  acquisition_cost: .05 # TODO: override this
+  pretrain_iters: 1
+  warmup_iters: 20
+  lr: 2e-4
+  base_lr: 1e-6
+  policy_lr: 2e04
+  policy_base_lr: 2e-4
+  latent_dim: 64
+imputation_model_cfg:
+  exp_p: experiments/baselines/difa/outputs/big5/vaeac/20250401_122828
+  run_id: 0
+  model_p: outputs/models/vaeac.pt
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
+# jafa_cfg:
+#   r_cost: -0.05 # TODO this seems to control penalty for feature(?)
+#   pretrain: 20_000
+#   dropout: true
+#   batchnorm: true
+#   p: 0.5
+#   embedder_hidden_sizes: [256, 256]
+#   clf_hidden_sizes: [256, 256]
+#   policy_hidden_sizes: [256]
+#   shared_dim: 256
+#   n_envs: 64
+#   nsteps: 10
+#   normalize: true
+#   embedded_dim: 256
+#   lstm_size: 256
+#   batch_size: 128
