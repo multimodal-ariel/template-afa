@@ -25,7 +25,7 @@ jafa_cfg:
   policy_hidden_sizes: [64]
   shared_dim: 32
   n_envs: 64
-  nsteps: 4
+  nsteps: 8
   normalize: true
   embedded_dim: 32
   lstm_size: 32
