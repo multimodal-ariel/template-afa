@@ -98,10 +98,11 @@ class Model(object):
             if self.params.cost_based:
                 done = diff_actions[:, -1].detach() == 1.0
             else:
-                done = (
-                    unobserved_mask.sum(dim=-1)
-                    == len(unobserved_mask[0]) - self.params.n_features
-                )
+                # done = (
+                #     unobserved_mask.sum(dim=-1)
+                #     == len(unobserved_mask[0]) - self.params.n_features
+                # )
+                done = unobserved_mask[:, :-1].sum(dim=-1) == 1
             # double slicing does not assign values
             not_done_indices = torch.where(not_done)[0]  # (B1,)
             new_done_indices = not_done_indices[done]
