@@ -11,12 +11,12 @@ difa_cfg:
   data: load_aaco_data/mnist/true
   name: vaeac
   problem: vaeac
-  hidden_dim: 256
-  embed_dim: 32
+  hidden_dim: 512
+  embed_dim: 128
   depth: 2
   iters: 1000
-  batch_size: 64
-  ppo_batch_size: 64
+  batch_size: 8192
+  ppo_batch_size: 8192
   dropout: .05
   acquisition_cost: .05 # TODO: override this
   warmup_iters: 20
@@ -24,7 +24,7 @@ difa_cfg:
   base_lr: 1e-6
   policy_lr: 2e04
   policy_base_lr: 2e-4
-  latent_dim: 64
+  latent_dim: 128
 plf:
   _target_: lightning.Fabric
   accelerator: auto
