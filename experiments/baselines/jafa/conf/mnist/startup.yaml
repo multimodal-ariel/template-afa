@@ -14,22 +14,27 @@ data:
 plf:
   _target_: lightning.Fabric
   accelerator: auto
+  plugins: [
+    {
+      _target_: lightning.fabric.plugins.environments.lightning.LightningEnvironment,
+    }  
+  ]
 jafa_cfg:
   r_cost: -0.05 # TODO this seems to control penalty for feature(?)
   pretrain: 20_000
   dropout: true
   batchnorm: true
   p: 0.5
-  embedder_hidden_sizes: [512, 512]
-  clf_hidden_sizes: [512, 512]
-  policy_hidden_sizes: [512]
+  embedder_hidden_sizes: [256, 256]
+  clf_hidden_sizes: [256, 256]
+  policy_hidden_sizes: [256]
   shared_dim: 16
   n_envs: 64
   nsteps: 4
   normalize: true
-  embedded_dim: 256
-  lstm_size: 256
-  batch_size: 128
+  embedded_dim: 128
+  lstm_size: 128
+  batch_size: 64
 
 # bsz: 128
 # value_nnet:
