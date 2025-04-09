@@ -22,17 +22,32 @@ def identify_init_fidx(
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     max_features: Optional[int],
     n_repeat: int,
-    n_iter: int,
+    n_masks: int,
     lmbda: float,
     bsz: int,
 ) -> tuple[int, th.Tensor]:
+    """a function to find initial feature index
+
+    Args:
+        tdata (thd.TensorDict): (n, ) training data and must contain `xs` and `ys`
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier
+        max_features (Optional[int]): optional maximum number of features; if `none`, no restriction on number of features included in template.
+        n_repeat (int): number of trials to search for initial feature
+        n_masks (int): number of candidates to condsider for each trail
+        lmbda (float): penalty term for choosing more features
+        bsz (int): batch size
+
+    Returns::
+        int: initial feature index
+        th.Tensor: (n_covs, ) the costs of each feature
+    """
     best_fms: th.Tensor = th.stack(
         [
             _ident_init_fidx_single(
                 tdata=tdata,
                 classifier=classifier,
                 max_features=max_features,
-                n_iter=n_iter,
+                n_masks=n_masks,
                 lmbda=lmbda,
                 bsz=bsz,
             )[1]
@@ -61,6 +76,25 @@ def make_templates_vanilla(
     bsz: int,
     plf: pl.Fabric,
 ) -> th.Tensor:
+    """make templates greedily
+
+    Args:
+        tdata (thd.TensorDict): (n, ) training data
+        max_tdata (Optional[int]): optional maximum training data to subsample if training data is too large and takes too long to complete
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier to use
+        to_update_classifier (bool): to update subset feature classifier when a new collection of templates is generated and before the final collection of templates is found.
+        init_fidx (int): initial feature index
+        n_tmpls (int): number of templates to return
+        n_cands (int): number of candidates used to search
+        min_features (int): minimum number of features to include in each template; must be greater than 1.
+        max_features (Optional[int]): maximum number of features to include in each template; if `None`, `n_covs` is used.
+        lmbda (float): penalty term for choosing more features.
+        bsz (int): batch size for evaluating candidates
+        plf (pl.Fabric): lightning fabric instance
+
+    Returns:
+        th.Tensor: (n_tmpls, n_covs)
+    """
     classifier.to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
@@ -215,6 +249,29 @@ def make_templates_fix_rounds(
     bsz: int,
     plf: pl.Fabric,
 ) -> th.Tensor:
+    """make templates using mutate greedy search
+
+    Args:
+        tdata (thd.TensorDict): (n, ) training data
+        max_tdata (Optional[int]): optional maximum training data to subsample if training data is too large and takes too long to complete
+         classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier to use
+        to_update_classifier (bool): _descriptto update subset feature classifier when a new collection of templates is generated and before the final collection of templates is found.
+         init_fidx (int): initial feature index
+        n_tmpls_targ (int): number of templates to return
+        n_cands_init (int): initial candidate size
+        n_cands_mutate (int | None): after initial search, number of candidates coming from mutating previous round templates; set to `n_tmpls_targ` if `None`
+        n_cands_targ (int | None): after initial search, number of toal amount of candidates; set to `5 * n_tmpls_targ` if `None`.
+        min_features (int): minimum number of features to include in each template; must be greater than 1.
+        max_features (Optional[int]): maximum number of features to include in each template; if `None`, `n_covs` is used.
+        n_rounds (int): number of mutative greedy search
+        use_feature_importance_sampling (bool): use feautre frequencies from previous round identified templates to sample candidates for next round of search.
+        lmbda (float): penalty term for choosing more features.
+        bsz (int): batch size for evaluating candidates
+        plf (pl.Fabric): lightning fabric instance
+
+    Returns:
+        th.Tensor: (n_tmpls, n_covs)
+    """
     classifier.eval().to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
@@ -521,6 +578,19 @@ def make_templates_from_candidates(
     plf: pl.Fabric,
     log_prefix: Optional[str] = "mk_tmpl",
 ) -> tuple[th.Tensor, th.Tensor]:
+    """make templates given a collection of candidates
+
+    Args:
+        tpcomp (thd.TensorDict): (n, ) precomputed results from using `tafalib.utils.precomp_rwds_for_tmpls`
+        ctmpls (th.Tensor): (n_cands, n_covs) collection of candidates
+        n_tmpls (int): number of templates
+        plf (pl.Fabric): lightning fabric instance
+        log_prefix (Optional[str], optional): prefix for logging. Defaults to "mk_tmpl".
+
+    Returns::
+        th.Tensor: (n_tmpls, n_covs) collection of identified templates
+        th.Tensor: (n_cands, ) indicator vector over candidates, i.e. `tmpls = n_cands[slctd_ms]`
+    """
     # (n_data, n_cands)
     rwds: th.Tensor = tpcomp["rwds"]
     costs: th.Tensor = -rwds
@@ -649,7 +719,7 @@ def _ident_init_fidx_single(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     max_features: Optional[int],
-    n_iter: int,
+    n_masks: int,
     lmbda: float,
     bsz: int,
 ) -> tuple[int, th.Tensor]:
@@ -664,12 +734,12 @@ def _ident_init_fidx_single(
             )
         )
     fms: th.Tensor = tafalib_makers_candidates.make_feature_masks(
-        n_covs=n_covs, n_masks=n_iter, min_features=1, max_features=max_features
+        n_covs=n_covs, n_masks=n_masks, min_features=1, max_features=max_features
     )
     best_mask_cost: th.Tensor = th.inf * th.ones((n_covs,))
-    n_iter = min(n_iter, len(fms))
+    n_masks = min(n_masks, len(fms))
     for _i in tqdm.trange(
-        n_iter, desc="ident_init_fidx_single", leave=False, dynamic_ncols=True
+        n_masks, desc="ident_init_fidx_single", leave=False, dynamic_ncols=True
     ):
         # (n_covs, )
         _bfm: th.Tensor = fms[_i]
@@ -700,6 +770,20 @@ def _update_template_candidates(
     max_features: Optional[int],
     use_feature_importance_sampling: bool,
 ) -> th.Tensor:
+    """update template candidates
+
+    Args:
+        ctmpls (th.Tensor): (n_cands, n_covs) collection of candidates used in previous round
+        slctd_ms (th.Tensor): (n_cands, ) indicator vector over `ctmpls` s.t. collection of tempaltes found in previous round `tmpls = ctmpls[slctd_ms]`
+        init_fidx (int): initial feature index
+        n_cands_targ (int): target number of candidates
+        min_features (int): minimum number of features included in each candidate
+        max_features (Optional[int]): optional maximum number of features included in each candidates; set to `n_covs` if `None`.
+        use_feature_importance_sampling (bool): use feautre frequencies from previous round identified templates to sample candidates for next round of search.
+
+    Returns:
+        th.Tensor: (n_cands, n_covs) a new collection of candidates.
+    """
     fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
         tmpls_prv=ctmpls[slctd_ms],
         init_fidx=init_fidx,
