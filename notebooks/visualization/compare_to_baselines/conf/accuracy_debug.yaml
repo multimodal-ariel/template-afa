@@ -1,0 +1,49 @@
+title: null
+key: acc
+expcfgs: [
+    { subtitle: big5, exp_ps: {
+          "aco": "experiments/baselines/aco/outputs/big5/20250313_153149",
+          # "dime": "experiments/baselines/dime/outputs/big5_eval/20250319_144337",
+          "tafa": "experiments/make_template/outputs/big5_cnnet/20250318_144121",
+        }, xlim: [4, 20], ylim: [0.5, 0.8] },
+    { subtitle: cube, exp_ps: {
+          "aco": "experiments/baselines/aco/outputs/cube/20250311_201540",
+          # "dime": "experiments/baselines/dime/outputs/cube_eval/20250323_223212",
+          "tafa": "experiments/make_template/outputs/cube/20250318_225416",
+        }, xlim: [4, 7], ylim: [0.73, null] },
+    { subtitle: gas, exp_ps: {
+          "aco": "experiments/baselines/aco/outputs/gas/20250312_143952",
+          # "dime": "experiments/baselines/dime/outputs/gas_eval/20250319_150025",
+          "tafa": "experiments/make_template/outputs/gas_cnnet/20250324_224734",
+          # "tafa": "experiments/make_template/outputs/gas_cnnet/20250314_113723",
+        }, xlim: [2.2, 3.3], ylim: [0.95, 0.98] },
+    {
+      subtitle: grid,
+      exp_ps: {
+          "aco": "experiments/baselines/aco/outputs/grid/20250311_221119",
+          # "dime": "experiments/baselines/dime/outputs/grid_eval/20250323_220729",
+          "tafa": "experiments/make_template/outputs/grid_cnnet/20250325_213622",
+          # "tafa": "experiments/make_template/outputs/grid_cnnet/20250325_173128",
+          # "tafa": "experiments/make_template/outputs/grid_cnnet/20250325_171724",
+          # "tafa": "experiments/make_template/outputs/grid_cnnet/20250322_235218",
+        },
+      # xlim: [3, 8],
+      # ylim: [0.75, null],
+      xlim: [3, 8],
+      ylim: [0.78, null],
+    },
+    {
+      subtitle: mnist,
+      exp_ps: {
+          "aco": "experiments/baselines/aco/outputs/mnist/20250312_143945",
+          # "aco": "experiments/baselines/aco/outputs/mnist/20250323_183552",
+          # "dime": "experiments/baselines/dime/outputs/mnist_eval/20250323_170930",
+          "tafa": "experiments/make_template/outputs/mnist_cnnet/20250326_003820",
+          # "tafa": "experiments/make_template/outputs/mnist_cnnet/20250314_113824",
+        },
+      # xlim: [15, 30],
+      # ylim: [0.87, 0.97],
+      xlim: [3.5, 40],
+      ylim: [null, null],
+    },
+  ]

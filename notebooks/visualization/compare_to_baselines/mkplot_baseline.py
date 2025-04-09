@@ -26,7 +26,9 @@ os.makedirs(OUTPUT_P, exist_ok=True)
 
 # %%
 # pltcfg_p: str = "conf/f1-score.yaml"
-pltcfg_p: str = "conf/accuracy_nolim.yaml"
+# pltcfg_p: str = "conf/accuracy_nolim.yaml"
+# pltcfg_p: str = "conf/accuracy_nojafa.yaml"
+pltcfg_p: str = "conf/accuracy_wjafa.yaml"
 # pltcfg_p: str = "conf/accuracy_debug.yaml"
 # pltcfg_p: str = "conf/accuracy_wdagger.yaml"
 
@@ -54,26 +56,51 @@ keys_to_ylabel = {
 }
 method_to_label = {
     "make_templates_vanilla": "greedy",
-    "make_templates_fix_rounds": "mutate",
+    "make_templates_fix_rounds": "ours",
     # "make_templates_reduce_features": "tafa-reduce-search",
-    "dagger-make_templates_vanilla": "greedy-dagger",
-    "dagger-make_templates_fix_rounds": "mutate-dagger",
+    # "dagger-make_templates_vanilla": "greedy-dagger",
+    # "dagger-make_templates_fix_rounds": "mutate-dagger",
     # "dagger-make_templates_reduce_features": "tafa-reduce-search-dagger",
-    "dropout-make_templates_vanilla": "greedy-dropout",
-    "dropout-make_templates_fix_rounds": "mutate-dropout",
+    # "dropout-make_templates_vanilla": "greedy-dropout",
+    # "dropout-make_templates_fix_rounds": "mutate-dropout",
 }
-label_to_method = {v: k for k, v in method_to_label.items()}
-label_to_method.update({"aco": "aco", "dime": "dime", "jafa": "jafa"})
+label_to_method = {"aco": "aco", "dime": "dime", "jafa": "jafa", "static": "static"}
+label_to_method.update({v: k for k, v in method_to_label.items()})
 method_to_plot_kwargs = {
-    "make_templates_vanilla": {"color": "blue"},
-    "make_templates_fix_rounds": {"color": "red"},
-    "dagger-make_templates_vanilla": {"color": "purple"},
-    "dagger-make_templates_fix_rounds": {"color": "darkgreen"},
-    "dropout-make_templates_vanilla": {"color": "lime"},
-    "dropout-make_templates_fix_rounds": {"color": "cyan"},
-    "aco": {"color": "gold"},
-    "dime": {"color": "magenta"},
-    "jafa": {"color": "blueviolet"},
+    "make_templates_fix_rounds": {
+        "color": "blue",
+        "alpha": 0.7,
+        "marker": ".",
+    },
+    "aco": {
+        "color": "red",
+        "alpha": 0.7,
+        "marker": ".",
+    },
+    "dime": {
+        "color": "orange",
+        "alpha": 0.7,
+        "marker": ".",
+    },
+    "jafa": {
+        "color": "indigo",
+        "alpha": 0.7,
+        "marker": ".",
+    },
+    "static": {
+        "color": "green",
+        "alpha": 0.7,
+        "marker": ".",
+    },
+    "make_templates_vanilla": {
+        "color": "redorange",
+        "alpha": 0.7,
+        "marker": ".",
+    },
+    # "dagger-make_templates_vanilla": {"color": "purple"},
+    # "dagger-make_templates_fix_rounds": {"color": "dargreen"},
+    # "dropout-make_templates_vanilla": {"color": "lime"},
+    # "dropout-make_templates_fix_rounds": {"color": "cyan"},
 }
 # "color": "blue"
 # "color": "red"
@@ -236,7 +263,7 @@ def load_metrics(
 ) -> dict[str, list[pd.DataFrame]]:
     metrics_d: dict[str, list[pd.DataFrame]] = dict()
     for name, exp_p in exp_ps.items():
-        if name in {"aco", "dime"}:
+        if name in {"aco", "dime", "static"}:
             metrics_d[name] = load_baseline_metrics(exp_p)
         elif name == "jafa":
             metrics_d[name] = load_jafa_metrics(exp_p)
@@ -285,12 +312,14 @@ def make_plots(
                         "exclude_mktmplfn_name": [
                             "make_templates_reduce_features",
                             "make_templates_fix_rounds_nearest_neighbors",
+                            "make_templates_vanilla",
                         ]
                     },
                     "tafa-dagger": {
                         "exclude_mktmplfn_name": [
                             "make_templates_reduce_features",
                             "make_templates_fix_rounds_nearest_neighbors",
+                            "make_templates_vanilla",
                         ]
                     },
                 },
@@ -331,7 +360,7 @@ def make_plots(
                 _data[:, 0],
                 _data[:, 1],
                 label=_name,
-                marker="x",
+                # marker="x",
                 **method_to_plot_kwargs[label_to_method[_name]],
             )
         _ax_lines, _ax_labels = _ax.get_legend_handles_labels()
@@ -369,7 +398,8 @@ fig.set_figwidth(1.7 * len(axs[0]))
 if pltcfg.title is not None:
     fig.suptitle(pltcfg.title)
 fig.supxlabel("number of feature acquisition\n")
-fig.supylabel(keys_to_ylabel[pltcfg.key])
+# fig.supylabel(keys_to_ylabel[pltcfg.key])
+axs[0][0].set_ylabel(keys_to_ylabel[pltcfg.key])
 fig.legend(
     line_set,
     label_set,
@@ -380,7 +410,7 @@ fig.legend(
     # borderaxespad=0.18,
 )
 fn: str = os.path.splitext(pltcfg_p.split("/")[-1])[0]
-fig.savefig(os.path.join(OUTPUT_P, f"{fn}.png"), dpi=720, bbox_inches="tight")
+fig.savefig(os.path.join(OUTPUT_P, f"{fn}_baseline.png"), dpi=720, bbox_inches="tight")
 plt.show()
 plt.close()
 

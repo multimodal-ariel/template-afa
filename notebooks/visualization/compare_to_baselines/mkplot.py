@@ -31,10 +31,14 @@ os.makedirs(OUTPUT_P, exist_ok=True)
 # title = "gas"
 # exp_ps: dict[str, str] = {
 #     "aco": "experiments/baselines/aco/outputs/gas/20250312_143952",
-#     "dime": "experiments/baselines/dime/outputs/gas_eval/20250319_150025",
-#     "tafa": "experiments/make_template/outputs/gas_cnnet/20250314_113723",
+#     # "dime": "experiments/baselines/dime/outputs/gas_eval/20250319_150025",
+#     "tafa": "experiments/make_template/outputs/gas_cnnet/20250324_224734",
+#     # "tafa": "experiments/make_template/outputs/gas_cnnet/20250314_113723",
+#     # "aco": "experiments/baselines/aco/outputs/gas/20250312_143952",
+#     # "dime": "experiments/baselines/dime/outputs/gas_eval/20250319_150025",
+#     # "tafa": "experiments/make_template/outputs/gas_cnnet/20250314_113723",
 # }
-# xlim: Optional[tuple[float, float]] = (2, 3.5)
+# xlim: Optional[tuple[float, float]] = (None, None)
 # ylim: Optional[tuple[float, float]] = None
 # title = "big5_cnnet"
 # exp_ps: dict[str, str] = {
@@ -44,14 +48,14 @@ os.makedirs(OUTPUT_P, exist_ok=True)
 #     "tafa": "experiments/make_template/outputs/big5_cnnet/20250318_144121",
 # }
 # xlim: Optional[tuple[float, float]] = (0.0, 17.0)
-title = "mnist_cnnet"
-exp_ps: dict[str, str] = {
-    "aco": "experiments/baselines/aco/outputs/mnist/20250312_143945",
-    "dime": "experiments/baselines/dime/outputs/mnist_eval/20250323_170930",
-    "tafa": "experiments/make_template/outputs/mnist_cnnet/20250314_113824",
-}
-xlim: Optional[tuple[float, float]] = (3, 50)
-ylim: Optional[tuple[float, float]] = (0.6, 0.95)
+# title = "mnist_cnnet"
+# exp_ps: dict[str, str] = {
+#     "aco": "experiments/baselines/aco/outputs/mnist/20250312_143945",
+#     "dime": "experiments/baselines/dime/outputs/mnist_eval/20250323_170930",
+#     "tafa": "experiments/make_template/outputs/mnist_cnnet/20250314_113824",
+# }
+# xlim: Optional[tuple[float, float]] = (3, 50)
+# ylim: Optional[tuple[float, float]] = (0.6, 0.95)
 
 
 # %%
