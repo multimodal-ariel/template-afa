@@ -76,6 +76,22 @@ def precomp_rwds_for_tmpls(
     bsz: int,
     plf: pl.Fabric,
 ) -> thd.TensorDict:
+    """precompute rewards rewards for using templates over passed in dataset.
+
+    Args:
+        tmpls (th.Tensor): (n_tmpls, n_covs) set of templates
+        data (thd.TensorDict): (n, ) dataset of interest; must contain key `xs` and `ys`
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier
+        lmbda (float): coefficient for feature cost
+        bsz (int): batch size
+        plf (pl.Fabric): lightning fabric instance
+
+    Returns::
+        thd.TensorDict: a TensorDict have same length as data containing following keys
+            `pyhats`: predicted class probability (n, n_tmpls, n_labels)
+            `cels`: (n, n_tmpls) cross entropy loss of each instance
+            `rwds`: (n, n_tmpls) rewards of each instance
+    """
     classifier.eval().to(device=plf.device)
     txs: th.Tensor = data["xs"]
     tys: th.Tensor = data["ys"]
@@ -125,6 +141,21 @@ def run_one_episode(
     tmpls: th.Tensor,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+    """run one episode using **only** features from the last used template
+
+    Args:
+        x (th.Tensor): (n_covs, ) instance of interest
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): subset feature classifier used to make prediction
+        cost_est (Callable[[th.Tensor], th.Tensor]): a cost estimator mapping a tensor of shape (n, 2 * n_covs) to a tensor of (n, n_tmpls)
+        init_fidx (int): initial feature indices
+        tmpls (th.Tensor): (n_tmpls, n_covs)
+        plf (pl.Fabric): lightning fabric instance
+
+    Returns::
+        th.Tensor: (n_labels, ) predicted class probability
+        list[int]: (n_feats_obsd, ) a list of feature indices in the order of acquisition.
+        tuple[int, ...]]: (n_feats_obsd, ) a tuple of feature indices acquired; does NOT preseve acquisition order
+    """
     classifier.eval().to(device=plf.device)
     if isinstance(cost_est, th.nn.Module):
         cost_est.eval().to(device=plf.device)
@@ -165,6 +196,21 @@ def run_one_episode_all_obsd(
     tmpls: th.Tensor,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
+    """run one episode using **all** features acquired
+
+    Args:
+        x (th.Tensor): (n_covs, ) instance of interest
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): subset feature classifier used to make prediction
+        cost_est (Callable[[th.Tensor], th.Tensor]): a cost estimator mapping a tensor of shape (n, 2 * n_covs) to a tensor of (n, n_tmpls)
+        init_fidx (int): initial feature indices
+        tmpls (th.Tensor): (n_tmpls, n_covs)
+        plf (pl.Fabric): lightning fabric instance
+
+    Returns::
+        th.Tensor: (n_labels, ) predicted class probability
+        list[int]: (n_feats_obsd, ) a list of feature indices in the order of acquisition.
+        tuple[int, ...]]: (n_feats_obsd, ) a tuple of feature indices acquired; does NOT preseve acquisition order
+    """
     classifier.eval().to(device=plf.device)
     if isinstance(cost_est, th.nn.Module):
         cost_est.eval().to(device=plf.device)
@@ -203,6 +249,20 @@ def evaluate(
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
 ) -> dict[str, float]:
+    """compute metrics through rolling out policy over a dataset
+
+    Args:
+        data (thd.TensorDict): (n, ) dataset of interest; must contain `xs` and `ys`
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): subset feature classifier used to make prediction
+        cost_est (Callable[[th.Tensor], th.Tensor]): cost estimator
+        init_fidx (int): initial feature index
+        tmpls (th.Tensor): (n_tmpls, n_covs) collection of templates
+        metrics_func (thm.MetricCollection): a collection of metrics of interests
+        plf (pl.Fabric): plf instance for prediction
+
+    Returns:
+        dict[str, float]: a dictionary of metrics
+    """
     snfobsd_l: list[int] = list()
     snfcomb_l: list[int] = list()
     metrics_func.reset()
@@ -244,6 +304,23 @@ def predict(
     tmpls: th.Tensor,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, th.Tensor, th.Tensor, list[list[int]]]:
+    """make predictions through rolling out policy over a dataset
+
+    Args:
+        data (thd.TensorDict): (n, ) dataset of interest; must contain `xs` and `ys`
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): subset feature classifier used to make prediction
+        cost_est (Callable[[th.Tensor], th.Tensor]): cost estimator
+        init_fidx (int): initial feature index
+        tmpls (th.Tensor): (n_tmpls, n_covs) collection of templates
+        metrics_func (thm.MetricCollection): a collection of metrics of interests
+        plf (pl.Fabric): plf instance for prediction
+
+    Returns::
+        th.Tensor: (n, n_labels) predicted class probability
+        th.Tensor: (n, n_covs) last template selected
+        th.Tensor: (n, n_covs) indicators for feature observed
+        list[tuple[int, ...]]]: a list of length n with each element being a length (n_feats_obsd, ) tuple of feature indices acquired; does NOT preseve acquisition order
+    """
     n_labels: int = classifier.n_labels
     pyhats: th.Tensor = th.empty((len(data), n_labels), dtype=th.float32)
     oms: th.Tensor = th.zeros_like(data["xs"])
