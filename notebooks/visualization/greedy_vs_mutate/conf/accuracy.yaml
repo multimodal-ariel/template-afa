@@ -1,0 +1,56 @@
+title: null
+key: acc
+expcfgs: [
+    { subtitle: big5, exp_ps: {
+          "tafa": "experiments/make_template/outputs/big5_cnnet/20250318_144121",
+          # "aco": "experiments/baselines/aco/outputs/big5/20250313_153149",
+          # "dime": "experiments/baselines/dime/outputs/big5_eval/20250319_144337",
+          # "jafa": "experiments/baselines/jafa/outputs/big5/20250326_231416",
+          # "jafa": "experiments/baselines/jafa/outputs/big5/20250330_184611",
+          # "static": "experiments/baselines/static/outputs/big5/20250330_204641",
+        }, xlim: [3, 13], ylim: [0.5, 0.76] },
+    { subtitle: cube, exp_ps: {
+          "tafa": "experiments/make_template/outputs/cube/20250318_225416",
+          # "aco": "experiments/baselines/aco/outputs/cube/20250311_201540",
+          # "dime": "experiments/baselines/dime/outputs/cube_eval/20250323_223212",
+          # "jafa": "experiments/baselines/jafa/outputs/cube/20250327_021409",
+          # # "static": "experiments/baselines/static/outputs/cube/20250330_202833",
+          # "static": "experiments/baselines/static/outputs/cube/20250330_205003",
+        }, xlim: [5.5, 7], ylim: [0.855, 0.885] },
+    { subtitle: gas, exp_ps: {
+          "tafa": "experiments/make_template/outputs/gas_cnnet/20250314_113723",
+          # "tafa": "experiments/make_template/outputs/gas_cnnet/20250324_224734",
+          # "aco": "experiments/baselines/aco/outputs/gas/20250312_143952",
+          # "dime": "experiments/baselines/dime/outputs/gas_eval/20250319_150025",
+          # # "tafa": "experiments/make_template/outputs/gas_cnnet/20250314_113723",
+          # "jafa": "experiments/baselines/jafa/outputs/gas/20250327_125619",
+          # # "static": "experiments/baselines/static/outputs/gas/20250330_202905",
+          # "static": "experiments/baselines/static/outputs/gas/20250330_204924",
+          # }, xlim: [2, 5.0], ylim: [.96, .97] },
+        }, xlim: [2.3, 2.5], ylim: [.963, .975] },
+    { subtitle: grid, exp_ps: {
+          "tafa": "experiments/make_template/outputs/grid_cnnet/20250325_213622",
+          # "aco": "experiments/baselines/aco/outputs/grid/20250311_221119",
+          # "dime": "experiments/baselines/dime/outputs/grid_eval/20250323_220729",
+          # "tafa": "experiments/make_template/outputs/grid_cnnet/20250322_235218",
+          # "jafa": "experiments/baselines/jafa/outputs/grid/20250327_071151",
+          # # "static": "experiments/baselines/static/outputs/grid/20250330_203012",
+          # "static": "experiments/baselines/static/outputs/grid/20250330_204901",
+          # }, xlim: [3, 7], ylim: [0.3, null] },
+        }, xlim: [5, 7.5], ylim: [0.86, .92] },
+        # }, xlim: [null,null], ylim: [null, null] },
+    {
+      subtitle: mnist,
+      exp_ps: {
+          "tafa": "experiments/make_template/outputs/mnist_cnnet/20250326_003820",
+          # "aco": "experiments/baselines/aco/outputs/mnist/20250326_163939",
+          # "dime": "experiments/baselines/dime/outputs/mnist_eval/20250323_170930",
+          # "static": "experiments/baselines/static/outputs/mnist/20250330_203102",
+          # # "static": "experiments/baselines/static/outputs/mnist/20250330_204831",
+        },
+      xlim: [10, 30],
+      # xlim: [4.3, 15],
+      ylim: [0.8, 0.98],
+      # ylim: [.53, .95],
+    },
+  ]
