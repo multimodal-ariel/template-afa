@@ -122,7 +122,15 @@ class SubsetFeatureClassifier(th.nn.Module, ABC, Generic[MT]):
 
 class SubsetFeatureConcatClassifier(SubsetFeatureClassifier[MT]):
     @abstractmethod
-    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]: ...
+    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
+        """fit a concat subset feature classifier
+
+        Args:
+            acts_tmpls (th.Tensor): (n_tmpls, n_covs) set of templates
+
+        Returns:
+            dict[str, float]: a dictionary containing fit metrics
+        """
 
 
 class SubsetFeatureConcatXGBClassifier(SubsetFeatureConcatClassifier[None]):
@@ -294,6 +302,16 @@ class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]
     def evaluate(
         self, data: thd.TensorDict, tmpls: th.Tensor, init_fidx: Optional[int]
     ) -> dict[str, float]:
+        """evaluate the performance of classifier over a dataset.
+
+        Args:
+            data (thd.TensorDict): a dataset containing at least `xs` `ys`
+            tmpls (th.Tensor): (n_tmpls, n_covs) templates
+            init_fidx (Optional[int]): initial feature index; if `None`, use randomly drawn initial feature
+
+        Returns:
+            dict[str, float]: a metric dictionary
+        """
         metrics_func = thm.MetricCollection(
             {
                 "acc": thm.Accuracy(task="multiclass", num_classes=self.n_labels),
