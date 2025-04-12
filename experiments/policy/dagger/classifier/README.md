@@ -1,1 +1,0 @@
-`python train.py -m -cp=conf/cube/ -cn=startup hydra/launcher=joblib hydra.launcher.n_jobs=100 +mktmpl_exp.exp_p='experiments/make_template/outputs/cube/20250305_155142' +mktmpl_exp.run_id='range(0,16)'`
