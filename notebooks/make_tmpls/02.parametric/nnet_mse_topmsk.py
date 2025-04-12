@@ -236,6 +236,7 @@ metrics_func = thm.MetricCollection(
 init_fidx: int = 31
 n_tmpls_targ: int = 128
 n_cands_targ: int = 10_000
+n_cands_mutate: int = 256
 lmbda: float = 0.05
 fmsk_w_topk_tmpl: int = 128
 n_neighs: int = 10
@@ -264,7 +265,7 @@ if init_fidx is None:
         classifier=tclassifier,
         max_features=max_features_targ,
         n_repeat=2,
-        n_iter=500,
+        n_masks=500,
         lmbda=lmbda,
         bsz=bsz,
     )
@@ -278,6 +279,8 @@ tmpls: th.Tensor = tafalib.makers.templates.make_templates_fix_rounds(
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
     n_cands_init=n_cands_targ,
+    n_cands_mutate=n_cands_mutate,
+    n_cands_targ=n_cands_targ,
     min_features=min_features_targ,
     max_features=max_features_targ,
     n_rounds=n_rounds,
