@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 from typing import Optional, TypedDict
 
-import notebooks.policy.dropout.nnet_classifier._dropoutlib as _dropoutlib
 import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
@@ -237,7 +236,7 @@ if mktmpl_cfg.vclassifier is not None:
     )
 
 # %%
-stdata: thd.TensorDict = _dropoutlib.compile_selector_dataset(
+stdata: thd.TensorDict = compile_selector_dataset(
     tdata=tdata, tpcomp=tpcomp
 )
 
@@ -298,7 +297,7 @@ nnet = mymodels.nn.make_fcn(
 opt = th.optim.Adam(nnet.parameters(), lr=1e-4)
 
 # %%
-tstate = _dropoutlib._TrainState(
+tstate = _TrainState(
     nnet=nnet,
     opt=opt,
     fit_itr=0,
