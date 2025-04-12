@@ -107,7 +107,7 @@ if init_fidx is None:
         classifier=tclassifier,
         max_features=max_features_targ,
         n_repeat=2,
-        n_iter=500,
+        n_masks=500,
         lmbda=lmbda,
         bsz=bsz,
     )

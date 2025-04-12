@@ -31,6 +31,7 @@ vclassifier = tclassifier
 init_fidx: int = 6
 n_tmpls_targ: int = 64
 n_cands_targ: int = 10_000
+n_cands_mutate: int = 256
 min_features_targ: int = 1
 max_features_targ: Optional[int] = None
 min_features_init: int = 10
@@ -92,7 +93,7 @@ if init_fidx is None:
         classifier=tclassifier,
         max_features=max_features_targ,
         n_repeat=2,
-        n_iter=500,
+        n_masks=500,
         lmbda=lmbda,
         bsz=bsz,
     )
@@ -107,6 +108,8 @@ tmpls = tafalib.makers.templates.make_templates_fix_rounds(
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
     n_cands_init=n_cands_targ,
+    n_cands_mutate=n_cands_mutate,
+    n_cands_targ=n_cands_targ,
     min_features=min_features_targ,
     max_features=max_features_targ,
     n_rounds=n_rounds,
