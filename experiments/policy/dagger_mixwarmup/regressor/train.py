@@ -517,7 +517,8 @@ def main(cfg: MainConf):
     tstate = _TrainState(
         rplbuf=thrl_data.ReplayBuffer(
             storage=thrl_data.ListStorage(max_size=cfg.max_rplbuf_size),
-            sampler=thrl_data.SamplerWithoutReplacement(),
+            sampler=thrl_data.SamplerWithoutReplacement(drop_last=True),
+            batch_size=cfg.dagger_nnet_tcfg.bsz,
         ),
         nnet=nnet,
         opt=hd.utils.instantiate(cfg.warmup_nnet_tcfg.opt, params=nnet.parameters()),
