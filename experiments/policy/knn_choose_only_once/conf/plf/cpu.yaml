@@ -1,0 +1,2 @@
+_target_: lightning.Fabric
+accelerator: cpu

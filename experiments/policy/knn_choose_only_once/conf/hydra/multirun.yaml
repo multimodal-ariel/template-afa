@@ -1,0 +1,8 @@
+# TODO override this
+# job:
+#   name: big5_cnnet
+sweep:
+  dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+  subdir: ${hydra.job.num}
+launcher:
+  n_jobs: 8
