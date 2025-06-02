@@ -337,6 +337,8 @@ def make_plots(
         _ax.set_title(_expcfg.subtitle)
         _ax.set_box_aspect(1.0)
         for _name, _metrics_dfl in _metrics_d.items():
+            if len(_metrics_dfl) == 0:
+                continue
             _prefix: str
             if "eval/acc" in _metrics_dfl[0]:
                 _prefix = "eval"
