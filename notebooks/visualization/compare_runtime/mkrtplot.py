@@ -1,9 +1,10 @@
 # %%
 import os
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
+
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 # %%
 outputs_p: str = "outputs"
@@ -28,8 +29,8 @@ fig, ax = plt.subplots(layout="constrained")
 # fig.tight_layout()
 fig.set_figheight(2.0)
 fig.set_figwidth(0.6 + len(labels_l) * 0.4)
-ax.bar(ind, ts_aaco, width, label="aaco")
-ax.bar(ind + width, ts_tafa, width, label="ours")
+ax.bar(ind, ts_aaco, width, label="aco", color="red")
+ax.bar(ind + width, ts_tafa, width, label="ours", color="blue")
 ax.set_xticks(ind + width / 2, labels_l)
 ax.set_ylabel("log-scaled time (sec)")
 ax.set_yscale("log")
