@@ -254,9 +254,9 @@ def make_templates_fix_rounds(
     Args:
         tdata (thd.TensorDict): (n, ) training data
         max_tdata (Optional[int]): optional maximum training data to subsample if training data is too large and takes too long to complete
-         classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier to use
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier to use
         to_update_classifier (bool): _descriptto update subset feature classifier when a new collection of templates is generated and before the final collection of templates is found.
-         init_fidx (int): initial feature index
+        init_fidx (int): initial feature index
         n_tmpls_targ (int): number of templates to return
         n_cands_init (int): initial candidate size
         n_cands_mutate (int | None): after initial search, number of candidates coming from mutating previous round templates; set to `n_tmpls_targ` if `None`
