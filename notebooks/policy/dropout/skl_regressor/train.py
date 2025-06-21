@@ -273,7 +273,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     classifier=vclassifier,
     cost_est=lambda ctx: tafalib.functional.multi_output_sklearn_cost_est(
         ctx,
-        model=xgbr,
+        sklr=xgbr,
         lmbda=mktmpl_cfg.lmbda,
         tmpls=tmpls,
         # device=plf.device,
