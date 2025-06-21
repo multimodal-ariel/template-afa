@@ -50,7 +50,7 @@ def compile_cross_entropy_regressor_dataset(
     plf: pl.Fabric,
     rg: Optional[th.Generator] = None,
 ) -> thd.TensorDict:
-    classifier.to(device=plf.device)
+    classifier.eval().to(device=plf.device)
     n_covs: int = tdata["xs"].shape[1]
     n_tmpls: int = len(tmpls)
     sinps: th.Tensor = th.empty(
