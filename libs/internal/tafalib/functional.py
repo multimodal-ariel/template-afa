@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mylib.ml
+import mymodels
 import torch as th
 
 
@@ -61,6 +62,52 @@ def knn_cost_est(
         _costs: th.Tensor = _cels + lmbda * th.sum(_fm_avail, dim=1)
         costs_l.append(_costs)
     costs: th.Tensor = th.stack(costs_l, dim=0).to(device=_device)
+    return costs
+
+
+@th.no_grad()
+def multi_output_sklearn_cost_est(
+    inps: th.Tensor,
+    model: mymodels.protocols.ModuleHasPredict,
+    lmbda: float,
+    tmpls: th.Tensor,
+):
+    """multi-output neural sklearn cost estimator
+
+    Args:
+        inps (th.Tensor): (n, n_covs * 3)
+        model (mymodels.protocols.ModuleHasPredict): cross entropy sklearn estimator
+        lmbda (float): cost penalty
+        tmpls (th.Tensor): (n_tmpls, n_covs)
+
+    Returns:
+        th.Tensor: (n, n_tmpls) costs of using each template
+    """
+    n: int = len(inps)
+    n_tmpls: int = len(tmpls)
+    n_covs: int = tmpls.shape[1]
+    _device: th.device = inps.device
+    inps = inps.to(device="cpu")
+    tmpls = tmpls.to(device="cpu")
+    # make cost estimator input
+    # last dim in the order (feature vals, current fms, tmpls)
+    # (n, n_tmpls, 3 * n_covs)
+    sinps: th.Tensor = th.cat(
+        (inps[:, None, :].expand(-1, n_tmpls, -1), tmpls[None, :, :].expand(n, -1, -1)),
+        dim=2,
+    ).flatten(0, 1)
+    # compute estimated cross entropy
+    # (n, n_tmpls)
+    cels: th.Tensor = th.as_tensor(
+        model.predict(sinps.numpy(force=True)), dtype=th.float32
+    ).unflatten(0, (n, n_tmpls))
+    # compute available feature masks
+    # (n, n_tmpls, n_covs)
+    fms_avail: th.Tensor = th.maximum(
+        tmpls[None, :, :] - inps[:, None, n_covs:], th.as_tensor(0.0)
+    )
+    costs: th.Tensor = cels + lmbda * th.sum(fms_avail, dim=2)
+    costs = costs.to(device=_device)
     return costs
 
 
