@@ -68,7 +68,7 @@ def knn_cost_est(
 @th.no_grad()
 def multi_output_sklearn_cost_est(
     inps: th.Tensor,
-    model: mymodels.protocols.ModuleHasPredict,
+    sklr: mymodels.protocols.ModuleHasPredict,
     lmbda: float,
     tmpls: th.Tensor,
 ):
@@ -99,7 +99,7 @@ def multi_output_sklearn_cost_est(
     # compute estimated cross entropy
     # (n, n_tmpls)
     cels: th.Tensor = th.as_tensor(
-        model.predict(sinps.numpy(force=True)), dtype=th.float32
+        sklr.predict(sinps.numpy(force=True)), dtype=th.float32
     ).unflatten(0, (n, n_tmpls))
     # compute available feature masks
     # (n, n_tmpls, n_covs)
