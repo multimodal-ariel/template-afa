@@ -33,13 +33,6 @@ mktmpl_run_dir: str = "experiments/make_template/outputs/big5_cnnet/20250318_144
 
 
 # %%
-class _TrainState(TypedDict):
-    nnet: th.nn.Module
-    opt: th.optim.Optimizer
-    fit_itr: int
-    opt_step: int
-
-
 @th.no_grad()
 def compile_cross_entropy_regressor_dataset(
     tdata: thd.TensorDict,
@@ -272,11 +265,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     data=vdata,
     classifier=vclassifier,
     cost_est=lambda ctx: tafalib.functional.multi_output_sklearn_cost_est(
-        ctx,
-        sklr=xgbr,
-        lmbda=mktmpl_cfg.lmbda,
-        tmpls=tmpls,
-        # device=plf.device,
+        ctx, sklr=xgbr, lmbda=mktmpl_cfg.lmbda, tmpls=tmpls
     ),
     init_fidx=mktmpl_cfg.init_fidx,
     tmpls=tmpls,
