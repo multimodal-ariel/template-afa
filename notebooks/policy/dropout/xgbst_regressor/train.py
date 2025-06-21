@@ -9,7 +9,6 @@ import lightning as pl
 import lightning.fabric.loggers as plf_loggers
 import mylib
 import mymodels
-import numpy as np
 import pandas as pd
 import tafalib
 import tensordict as thd
@@ -49,7 +48,7 @@ def compile_cross_entropy_regressor_dataset(
     tmpls: th.Tensor,
     n_pairs_per_sample: int,
     plf: pl.Fabric,
-    rg: Optional[th.Generator],
+    rg: Optional[th.Generator] = None,
 ) -> thd.TensorDict:
     classifier.to(device=plf.device)
     n_covs: int = tdata["xs"].shape[1]
@@ -266,25 +265,6 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
 )
 print(pd.Series(metrics_d))
 
-
-# %%
-metrics_func.reset()
-metrics_d: dict[str, float] = tafalib.utils.evaluate(
-    data=vdata,
-    classifier=vclassifier,
-    cost_est=lambda ctx: xgb_cost_est(
-        ctx,
-        lmbda=mktmpl_cfg.lmbda,
-        tmpls=tmpls,
-        xgb_model=xgbr,
-        # device=plf.device,
-    ),
-    init_fidx=mktmpl_cfg.init_fidx,
-    tmpls=tmpls,
-    metrics_func=metrics_func,
-    plf=plf,
-)
-print(pd.Series(metrics_d))
 
 # %%
 metrics_func.reset()
