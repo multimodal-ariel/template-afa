@@ -4,7 +4,7 @@ import logging
 import os
 import traceback
 from dataclasses import dataclass
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional
 
 import hydra as hd
 import lightning as pl
