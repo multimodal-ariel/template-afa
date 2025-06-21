@@ -27,7 +27,8 @@ PROJ_ROOT: str = mylib.utils.get_project_root_dir()
 # %%
 # mktmpl_run_dir: str = "experiments/make_template/outputs/grid/20250305_145621/2"
 # mktmpl_run_dir: str = "experiments/make_template/outputs/cube/20250305_143844/4"
-mktmpl_run_dir: str = "experiments/make_template/outputs/big5_cnnet/20250314_112541/14"
+# mktmpl_run_dir: str = "experiments/make_template/outputs/big5_cnnet/20250314_112541/14"
+mktmpl_run_dir: str = "experiments/make_template/outputs/big5_cnnet/20250318_144121/5"
 
 
 # %%
@@ -229,9 +230,7 @@ if mktmpl_cfg.vclassifier is not None:
     )
 
 # %%
-stdata: thd.TensorDict = compile_selector_dataset(
-    tdata=tdata, tpcomp=tpcomp
-)
+stdata: thd.TensorDict = compile_selector_dataset(tdata=tdata, tpcomp=tpcomp)
 
 # %%
 # configure logger and ckpt path
