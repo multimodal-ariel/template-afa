@@ -174,6 +174,7 @@ def main(cfg: MainConf):
     tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
     csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
     ckpt_p: str = os.path.join(tfb_logger.log_dir, "checkpoints")
+    os.makedirs(ckpt_p, exist_ok=True)
     plf: pl.Fabric = hd.utils.instantiate(cfg.plf, _partial_=True)(
         loggers=[tfb_logger, csv_logger]
     )
