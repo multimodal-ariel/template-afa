@@ -203,7 +203,7 @@ def main(cfg: MainConf):
     th.save(
         {
             "sklr": sklr,
-            "stdata": stdata,
+            # "stdata": stdata,
         },
         os.path.join(ckpt_p, "warmup_end.pt"),
     )
