@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
+import traceback
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -101,7 +103,6 @@ def make_feature_masks(
     return fms
 
 
-@hd.main(version_base=None)
 def main(cfg: MainConf):
     # _delay_import()
     output_dir: str = HydraConfig.get().runtime.output_dir
@@ -147,4 +148,14 @@ def main(cfg: MainConf):
 
 
 if __name__ == "__main__":
-    main()
+
+    @hd.main(version_base=None)
+    def _main(cfg: MainConf):
+        logger = logging.getLogger(HydraConfig.get().job.name)
+        try:
+            main(cfg)
+        except Exception as e:
+            logger.error(e, exc_info=True, stack_info=True)
+            traceback.print_exception(e)
+
+    _main()
