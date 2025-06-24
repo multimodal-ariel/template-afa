@@ -13,6 +13,10 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 
 # %%
+# get rid of instances with label that are significantly under-represented
+mincount_ys: int = 1500
+
+# %%
 filenames_l: list[str] = list(
     filter(
         lambda p: str.lower(os.path.splitext(p)[-1]) == ".csv",
@@ -28,6 +32,10 @@ rdata_df: pd.DataFrame = pd.concat(
         for _fn in filenames_l
     ]
 )
+uc_np = np.unique_counts(rdata_df["m_label"].to_numpy())
+rdata_df = rdata_df[
+    rdata_df["m_label"].isin(uc_np.values[uc_np.counts >= mincount_ys].tolist())
+]
 
 # %%
 print(f"DataFrame shape: {rdata_df.shape}")
@@ -86,9 +94,17 @@ tidxs, vidxs, tstidxs = [
         th.arange(len(X)), (0.8, 0.1, 0.1), generator=th.Generator().manual_seed(279)
     )
 ]
+
+# %%
+assert len(np.unique(y[tidxs])) == len(np.unique(y[vidxs]))
+assert len(np.unique(y[vidxs])) == len(np.unique(y[tstidxs]))
+
+# %%
 with open(
     os.path.join(
-        mydatasets.common.get_datasets_files_root_dir(), "aaco", "charfont.pkl"
+        mydatasets.common.get_datasets_files_root_dir(),
+        "aaco",
+        f"charfont-{mincount_ys}.pkl",
     ),
     mode="wb",
 ) as f:
@@ -102,7 +118,9 @@ with open(
     )
 
 # %%
-tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("charfont", to_normalize=True)
+tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(
+    f"charfont-{mincount_ys}", to_normalize=True
+)
 
 # %%
 # Optional: Save preprocessed data
