@@ -17,6 +17,7 @@ from .. import utils as tafalib_utils
 from . import candidates as tafalib_makers_candidates
 
 
+@th.no_grad()
 def identify_init_fidx(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -25,6 +26,7 @@ def identify_init_fidx(
     n_masks: int,
     lmbda: float,
     bsz: int,
+    plf: pl.Fabric,
 ) -> tuple[int, th.Tensor]:
     """a function to find initial feature index
 
@@ -50,6 +52,7 @@ def identify_init_fidx(
                 n_masks=n_masks,
                 lmbda=lmbda,
                 bsz=bsz,
+                plf=plf,
             )[1]
             for _ in tqdm.trange(
                 n_repeat, desc="ident init_fidx", leave=False, dynamic_ncols=True
@@ -715,6 +718,7 @@ def make_templates_from_candidates_nearest_neighbors(
 
 
 # NOTE internal
+@th.no_grad()
 def _ident_init_fidx_single(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -722,8 +726,10 @@ def _ident_init_fidx_single(
     n_masks: int,
     lmbda: float,
     bsz: int,
+    plf: pl.Fabric,
 ) -> tuple[int, th.Tensor]:
     n_covs: int = tdata["xs"].shape[1]
+    classifier.eval().to(device=plf.device)
     if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
         classifier.fit_(
             tafalib_makers_candidates.make_feature_masks(
@@ -749,7 +755,9 @@ def _ident_init_fidx_single(
         _btdata: thd.TensorDict = tdata[_btidxs]
         _bfms: th.Tensor = _bfm[None, :].expand(bsz, -1)
         # (bsz, n_labels)
-        _bpyhats: th.Tensor = classifier.predict_proba(_btdata["xs"], _bfms)
+        _bpyhats: th.Tensor = classifier.predict_proba(
+            _btdata["xs"].to(device=plf.device), _bfms.to(device=plf.device)
+        ).to(device="cpu")
         _blyhats: th.Tensor = torch.distributions.utils.probs_to_logits(_bpyhats)
         # ()
         _bcosts: th.Tensor = th.nn.functional.cross_entropy(

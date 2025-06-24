@@ -111,6 +111,7 @@ if init_fidx is None:
         n_masks=500,
         lmbda=lmbda,
         bsz=bsz,
+        plf=plf,
     )
 
 

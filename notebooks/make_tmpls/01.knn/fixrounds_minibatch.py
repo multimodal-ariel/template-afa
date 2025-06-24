@@ -107,6 +107,7 @@ if init_fidx is None:
         n_iter=500,
         lmbda=lmbda,
         bsz=bsz,
+        plf=plf,
     )
 
 
