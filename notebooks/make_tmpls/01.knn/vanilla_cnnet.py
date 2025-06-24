@@ -68,6 +68,47 @@ max_features_targ: Optional[int] = None
 bsz: int = 409600
 
 # %%
+# # NOTE charfont-1500
+# data_name: str = "charfont-1500"
+# _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+# n_covs: int = _tdata["xs"].shape[1]
+# n_labels: int = len(th.unique(_tdata["ys"]))
+# max_tdata: Optional[int] = 8192
+# _tdata_shuffle_idxs = th.randperm(len(_tdata))
+# tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
+# extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
+# run_p: str = (
+#     "experiments/pretrain/nnet_subset_feature_classifier/outputs/charfont-1500/20250624_170501"
+# )
+# run_cfg = OmegaConf.load(
+#     os.path.join(mylib.utils.get_project_root_dir(), run_p, ".hydra", "config.yaml")
+# )
+# tclassifier = (
+#     mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
+#         nnet=hd.utils.instantiate(
+#             run_cfg.nnet,
+#             in_features=n_covs * 2,
+#             out_features=n_labels,
+#         ),
+#         xs_train=tdata["xs"].numpy(),
+#         ys_train=tdata["ys"].numpy(),
+#         fit_kwargs=hd.utils.instantiate(run_cfg.nnet_fit_cfg),
+#         state_dict_p=os.path.join(
+#             mylib.utils.get_project_root_dir(), run_p, "classifier.pt"
+#         ),
+#     )
+# )
+# tclassifier.fit_kwargs["n_iter"] = 10
+# vclassifier = None
+# init_fidx: int | None = 132
+# n_tmpls_targ: int = 128
+# n_cands_targ: int = 10_000
+# lmbda: float = 0.075
+# min_features_targ: int = 1
+# max_features_targ: Optional[int] = None
+# bsz: int = 8192
+
+# %%
 metrics_func = thm.MetricCollection(
     {
         "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
