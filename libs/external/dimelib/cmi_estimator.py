@@ -446,7 +446,7 @@ class CMIEstimator(pl.LightningModule):
             factor=self.factor,
             patience=self.patience,
             min_lr=self.min_lr,
-            verbose=True,
+            # verbose=True,
         )
         return {"optimizer": opt, "lr_scheduler": scheduler}
 
