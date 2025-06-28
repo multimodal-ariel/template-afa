@@ -25,10 +25,14 @@ print(tmnist["xs"].shape, tmnist["ys"].shape)
 tbg5, vbg5, tstbg5 = mydatasets.aaco.load_aaco_data("big5_C_cls", to_normalize=True)
 print(tbg5["xs"].shape)
 
-#%%
 # %%
-tcharfont, vcharfont, tstcharfont = mydatasets.aaco.load_aaco_data("charfont-1500", to_normalize=True)
+tcharfont, vcharfont, tstcharfont = mydatasets.aaco.load_aaco_data(
+    "charfont-1500", to_normalize=True
+)
 print(tcharfont["xs"].shape)
 
+# %%
+tvolvo, vvolvo, tstvolvo = mydatasets.aaco.load_aaco_data("volvo", to_normalize=True)
+print(tvolvo["xs"].shape)
 
 # %%
