@@ -58,9 +58,10 @@ def main(cfg: MainConf):
     n_covs: int = tdata["xs"].shape[1]
     n_labels: int = len(th.unique(tdata["ys"]))
     # make dataloader
-    n_workers: int | None = os.cpu_count()
-    if n_workers is None:
-        n_workers = 0
+    # n_workers: int | None = os.cpu_count()
+    # if n_workers is None:
+    #     n_workers = 0
+    n_workers: int | None = 0
     tloader = th_data.DataLoader(
         th_data.TensorDataset(tdata["xs"], tdata["ys"]),
         batch_size=run_cfg.bsz,
