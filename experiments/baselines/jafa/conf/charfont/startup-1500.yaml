@@ -1,0 +1,38 @@
+hydra:
+  job:
+    name: charfont-1500
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: charfont-1500
+  to_normalize: true
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
+  plugins:
+    [
+      {
+        _target_: lightning.fabric.plugins.environments.lightning.LightningEnvironment,
+      },
+    ]
+jafa_cfg:
+  r_cost: -0.05 # TODO this seems to control penalty for feature(?)
+  pretrain: 20_000
+  dropout: true
+  batchnorm: true
+  p: 0.5
+  embedder_hidden_sizes: [256, 256]
+  clf_hidden_sizes: [256, 256]
+  policy_hidden_sizes: [256]
+  shared_dim: 16
+  n_envs: 64
+  nsteps: 4
+  normalize: true
+  embedded_dim: 128
+  lstm_size: 128
+  batch_size: 32
