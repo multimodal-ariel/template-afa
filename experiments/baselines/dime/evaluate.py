@@ -121,7 +121,6 @@ def main(cfg: MainConf):
         logger=False,
         plugins=[pl_plugins_envs.LightningEnvironment()],
     )
-    
     inference_out: dict[str, th.Tensor] = cmi_module.inference(
         trainer, vloader, feature_costs=None, lam=cfg.lmbda
     )
