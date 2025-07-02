@@ -8,13 +8,16 @@ from typing import Any, Optional
 
 import aacolib.classifier
 import aacolib.mask_generator
+import dimelib
 import hydra as hd
 import lightning as pl
 import mylib.utils
 import mymodels
+import pytorch_lightning.plugins.environments as pl_plugins_envs
 import tafalib
 import tensordict as thd
 import torch as th
+import torch.utils.data as th_data
 import torchmetrics as thm
 import tqdm.auto as tqdm
 import xgboost as xgbst
@@ -25,25 +28,30 @@ OmegaConf.register_new_resolver(
 )
 
 # %%
-tafa_run_p: str = "experiments/make_template/outputs/big5_cnnet/20250318_144121/0"
-aaco_run_p: str = "experiments/baselines/aco/outputs/big5/20250313_153149/0"
-n_instances: int = 10
+# tafa_run_p: str = "experiments/make_template/outputs/big5_cnnet/20250318_144121/0"
+# aaco_run_p: str = "experiments/baselines/aco/outputs/big5/20250313_153149/0"
+# dime_run_p: str = "experiments/baselines/dime/outputs/big5_eval/20250319_144337/0"
+# n_instances: int = 10
 # # cube
 # tafa_run_p: str = "experiments/make_template/outputs/cube/20250318_225416/0"
 # aaco_run_p: str = "experiments/baselines/aco/outputs/cube/20250311_201540/0"
+# dime_run_p: str = "experiments/baselines/dime/outputs/cube_eval/20250323_223339/0"
 # n_instances: int = 10
 # # gas
 # tafa_run_p: str = "experiments/make_template/outputs/gas_cnnet/20250324_224734/16"
 # aaco_run_p: str = "experiments/baselines/aco/outputs/gas/20250312_143952/0"
+# dime_run_p: str = "experiments/baselines/dime/outputs/gas_eval/20250402_112555/0"
 # n_instances: int = 10
 # # grid
 # tafa_run_p: str = "experiments/make_template/outputs/grid_cnnet/20250325_213622/1"
 # aaco_run_p: str = "experiments/baselines/aco/outputs/grid/20250311_221119/0"
+# dime_run_p: str = "experiments/baselines/dime/outputs/grid_eval/20250323_220729/0"
 # n_instances: int = 10
-# # mnist
-# tafa_run_p: str = "experiments/make_template/outputs/mnist_cnnet/20250326_003820/1"
-# aaco_run_p: str = "experiments/baselines/aco/outputs/mnist/20250326_163939/0"
-# n_instances: int = 10
+# mnist
+tafa_run_p: str = "experiments/make_template/outputs/mnist_cnnet/20250326_003820/1"
+aaco_run_p: str = "experiments/baselines/aco/outputs/mnist/20250326_163939/0"
+dime_run_p: str = "experiments/baselines/dime/outputs/mnist_eval/20250323_170930/0"
+n_instances: int = 10
 
 
 # %%
@@ -507,5 +515,87 @@ def tafa_runtime():
 
 print("tafa")
 tafa_runtime()
+
+
+# %%
+def dime_runtime():
+    def _get_run_dir(cfg) -> str:
+        if hasattr(cfg, "train_run") and cfg.train_run is not None:
+            return cfg.train_run
+        assert hasattr(cfg, "train_exp") and cfg.train_exp is not None
+        return os.path.join(cfg.train_exp.exp_p, str(cfg.train_exp.run_id))
+
+    dime_ecfg = OmegaConf.load(
+        os.path.join(
+            mylib.utils.get_project_root_dir(), dime_run_p, ".hydra", "config.yaml"
+        )
+    )
+    trun_p: str = _get_run_dir(dime_ecfg)
+    dime_tcfg = OmegaConf.load(
+        os.path.join(
+            mylib.utils.get_project_root_dir(), trun_p, ".hydra", "config.yaml"
+        )
+    )
+    # make dataset
+    tdata, vdata, tstdata = hd.utils.call(dime_tcfg.data)
+    n_covs: int = tdata["xs"].shape[1]
+    n_labels: int = len(th.unique(tdata["ys"]))
+    vdata = vdata[th.multinomial(th.ones(len(vdata)), n_instances, replacement=False)]
+    vloader = th_data.DataLoader(
+        th_data.TensorDataset(vdata["xs"], vdata["ys"]),
+        batch_size=1,
+        shuffle=False,
+        pin_memory=True,
+        num_workers=0,
+    )
+    # make nnet
+    predictor_nnet: th.nn.Module = hd.utils.instantiate(
+        dime_tcfg.predictor_nnet, in_features=n_covs * 2, out_features=n_labels
+    )
+    value_nnet: th.nn.Module = hd.utils.instantiate(
+        dime_tcfg.value_nnet, in_features=n_covs * 2, out_features=n_covs
+    )
+    mask_layer = dimelib.utils.MaskLayer(mask_size=n_covs, append=True)
+    if dime_tcfg.share_weights_layer_indices is not None:
+        assert isinstance(predictor_nnet, th.nn.Sequential)
+        assert isinstance(value_nnet, th.nn.Sequential)
+        for _i in dime_tcfg.share_weights_layer_indices:
+            value_nnet[_i] = predictor_nnet[_i]
+    cmi_module_kwargs: dict[str, Any] = OmegaConf.to_container(
+        dime_tcfg.cmi_module_cfg.cmi_module
+    )  # type:ignore
+    cmi_module_kwargs.pop("_target_")
+    cmi_module = dimelib.cmi_estimator.CMIEstimator.load_from_checkpoint(
+        os.path.join(
+            mylib.utils.get_project_root_dir(),
+            trun_p,
+            "checkpoints",
+            "best_val_perf_model.ckpt",
+        ),
+        value_network=value_nnet,
+        predictor=predictor_nnet,
+        mask_layer=mask_layer,
+        **cmi_module_kwargs,
+        loss_fn=th.nn.CrossEntropyLoss(reduction="none"),
+        val_loss_fn=thm.Accuracy(task="multiclass", num_classes=n_labels),
+        map_location="cpu",
+    )
+    # predict with validation
+    trainer = pl.Trainer = hd.utils.instantiate(dime_ecfg.trainer, _partial_=True)(
+        logger=False,
+        plugins=[pl_plugins_envs.LightningEnvironment()],
+    )
+    _start: float = time.time()
+    inference_out: dict[str, th.Tensor] = cmi_module.inference(
+        trainer, vloader, feature_costs=None, lam=dime_ecfg.lmbda
+    )
+    _end: float = time.time()
+    time_avg = (_end - _start) / n_instances
+    nfeats_avg = th.mean(th.sum(inference_out["mask"], dim=1)).item()
+    print(f"time: {time_avg} n_feats: {nfeats_avg}")
+
+
+print("dime")
+dime_runtime()
 
 # %%
