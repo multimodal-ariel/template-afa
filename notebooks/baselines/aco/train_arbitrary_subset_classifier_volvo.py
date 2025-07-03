@@ -25,7 +25,7 @@ n_covs: int = txs.shape[1]
 # Generate 10,000,000 random masks
 np.random.seed(29)
 
-Rall = 1500
+Rall = 3000
 
 Ball = np.concatenate(
     [
