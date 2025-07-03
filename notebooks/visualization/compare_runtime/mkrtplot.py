@@ -13,7 +13,7 @@ os.makedirs(outputs_p, exist_ok=True)
 # %%
 # nfeats_aaco = [36.70, 78.900, 6.3, 8.30, 11.30]
 # nfeats_tafa = [47.2, 10.89, 6.0, 10.60, 34.79]
-fn: str = "time.png"
+fn: str = "eval_time.png"
 ts_aaco = [5.9212, 1.2519, 29.280, 29.0495, 26.1010]
 ts_tafa = [0.34837, 0.0248, 0.2254, 0.05618, 0.6679]
 ts_dime = [0.73881, 0.4489, 0.0976, 0.2670, 5.632]
