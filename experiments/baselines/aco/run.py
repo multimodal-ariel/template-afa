@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import traceback
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -68,6 +70,16 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
             )
         )
         return aacolib.classifier.classifier_xgb(xgb_model)
+    elif dataset_name == "volvo":
+        xgb_model = xgbst.XGBClassifier()
+        xgb_model.load_model(
+            os.path.join(
+                os.path.dirname(aacolib.__file__),
+                "_saved_models",
+                "volvo_xgb_classifier_arb_subsets.json",
+            )
+        )
+        return aacolib.classifier.classifier_xgb(xgb_model)
     else:
         raise ValueError("Unsupported dataset or model")
 
@@ -100,7 +112,7 @@ def get_knn(
 
 # Helper function to load the mask generator based on the dataset
 def load_mask_generator(dataset_name, input_dim):
-    if dataset_name in ["cube_20_0.3", "mnist", "big5_C_cls"]:
+    if dataset_name in ["cube_20_0.3", "mnist", "big5_C_cls", "volvo"]:
         return aacolib.mask_generator.random_mask_generator(10000, input_dim, 1000)
     elif dataset_name == "grid_data" or dataset_name == "gas":
         all_masks = aacolib.mask_generator.generate_all_masks(
@@ -309,7 +321,6 @@ def aaco_rollout(
     return results
 
 
-@hd.main(version_base=None)
 def main(cfg: MainConf):
     # _delay_import()
     output_dir: str = HydraConfig.get().runtime.output_dir
@@ -408,4 +419,14 @@ def main(cfg: MainConf):
 
 
 if __name__ == "__main__":
-    main()
+
+    @hd.main(version_base=None)
+    def _main(cfg: MainConf):
+        logger = logging.getLogger(HydraConfig.get().job.name)
+        try:
+            main(cfg)
+        except Exception as e:
+            logger.error(e, exc_info=True, stack_info=True)
+            traceback.print_exception(e)
+
+    _main()
