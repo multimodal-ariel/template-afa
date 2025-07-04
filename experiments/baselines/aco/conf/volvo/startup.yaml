@@ -16,3 +16,4 @@ init_fidx: 100
 lmbda: 0.1
 n_neighs: 100
 bsz: 8
+eval_bsz: 32
