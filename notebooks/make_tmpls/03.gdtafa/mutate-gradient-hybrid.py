@@ -364,7 +364,7 @@ n_rounds: int = 3
 feature_decrement: int = 2
 use_feature_importance_sampling: bool = True
 bsz: int = 4096
-lr: float = 1e-1
+lr: float = 1
 n_gradient_mutate_iters: int = 10
 n_gradient_steps_per_mutate_iter: int = 100
 
@@ -421,7 +421,7 @@ tmpls = make_templates_fix_rounds_with_gradient_descent(
     use_feature_importance_sampling=use_feature_importance_sampling,
     lmbda=lmbda,
     bsz=bsz,
-    make_opt_fn=lambda p: th.optim.SGD(p, lr=lr),
+    make_opt_fn=lambda p: th.optim.AdamW(p, lr=lr),
     n_gradient_mutate_iters=n_gradient_mutate_iters,
     n_gradient_steps_per_mutate_iter=n_gradient_steps_per_mutate_iter,
     plf=plf,
