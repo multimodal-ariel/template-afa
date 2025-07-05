@@ -1,0 +1,15 @@
+_target_: tafalib.makers.templates.make_vanilla_gradient_descent_templates
+max_tdata: null
+n_tmpls: 128
+n_tdata_minibatch: 2048
+n_cands_minibatch: 32
+n_cands_targ: 10_000
+min_features: 1
+max_features: null
+make_opt_fn:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1.0
+n_gradient_mutate_iters: 1_000
+n_gradient_steps_per_mutate_iter: 50
+to_update_classifier: false
