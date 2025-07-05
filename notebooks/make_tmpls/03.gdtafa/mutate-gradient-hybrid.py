@@ -363,10 +363,10 @@ min_features_init: int = 10
 n_rounds: int = 3
 feature_decrement: int = 2
 use_feature_importance_sampling: bool = True
-bsz: int = 4096
+bsz: int = 2048000
 lr: float = 1
 n_gradient_mutate_iters: int = 10
-n_gradient_steps_per_mutate_iter: int = 100
+n_gradient_steps_per_mutate_iter: int = 50
 
 
 # %%
@@ -382,7 +382,7 @@ metrics_func = thm.MetricCollection(
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "gdtafa")
+output_dir: str = os.path.join("outputs", "run", data_name, "gdtafa-hybrid")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
