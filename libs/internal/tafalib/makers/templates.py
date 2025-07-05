@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import itertools as itrtls
 import math
-from typing import Optional
+from typing import Callable, Iterable, Optional
 
 import lightning as pl
 import mylib
@@ -570,6 +570,173 @@ def make_templates_fix_rounds_nearest_neighbors(
         ):
             classifier.fit_(tmpls)
     assert tmpls is not None
+    return tmpls
+
+
+@th.enable_grad()
+def make_vanilla_gradient_descent_templates(
+    tdata: thd.TensorDict,
+    max_tdata: Optional[int],
+    classifier: mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier,
+    to_update_classifier: bool,
+    init_fidx: int,
+    n_tmpls: int,
+    n_tdata_minibatch: int,
+    n_cands_minibatch: int,
+    n_cands_targ: int,
+    min_features: int,
+    max_features: Optional[int],
+    lmbda: float,
+    bsz: int,
+    make_opt_fn: Callable[[Iterable[th.Tensor]], th.optim.Optimizer],
+    n_gradient_mutate_iters: int,
+    n_gradient_steps_per_mutate_iter: int,
+    plf: pl.Fabric,
+):
+    """
+    Generates a set of high-quality template feature selectors using gradient descent.
+
+    This function uses a neural network classifier and gradient-based optimization to iteratively
+    mutate and select binary feature templates. The process involves generating candidate templates,
+    optimizing them via gradient descent to maximize a reward (classification performance penalized
+    by template size), and selecting the best templates according to their precomputed rewards.
+
+    Args:
+        tdata (thd.TensorDict): Training data containing features and labels.
+        max_tdata (Optional[int]): Maximum number of training data points to use for template evaluation.
+        classifier (mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier): Classifier used for reward computation.
+        to_update_classifier (bool): Whether to refit the classifier on the selected templates.
+        init_fidx (int): Index of the initial feature to always include in templates.
+        n_tmpls (int): Number of templates to select and return.
+        n_tdata_minibatch (int): Number of data points per minibatch for gradient mutation.
+        n_cands_minibatch (int): Number of candidate templates per minibatch.
+        n_cands_targ (int): Target number of candidate templates to generate.
+        min_features (int): Minimum number of features in each template.
+        max_features (Optional[int]): Maximum number of features in each template.
+        lmbda (float): Regularization parameter penalizing template size.
+        bsz (int): Batch size for reward computation.
+        make_opt_fn (Callable[[Iterable[th.Tensor]], th.optim.Optimizer]): Function to create an optimizer for template parameters.
+        n_gradient_mutate_iters (int): Number of outer iterations for candidate mutation.
+        n_gradient_steps_per_mutate_iter (int): Number of gradient steps per mutation iteration.
+        plf (pl.Fabric): PyTorch Lightning Fabric object for device management.
+
+    Returns:
+        th.Tensor: Selected binary template matrix of shape (n_tmpls, n_features).
+    """
+
+    def _uniform_like(inputs: th.Tensor, low: float, high: float):
+        return th.distributions.Uniform(low, high).sample(inputs.shape)
+
+    classifier.eval().to(device=plf.device)
+    n_data: int = len(tdata)
+    n_covs: int = tdata["xs"].shape[1]
+    # use gradient descent to construct high quality templates
+    ctmpls: th.Tensor | None = None
+    for _itr in tqdm.trange(
+        n_gradient_mutate_iters, desc="gd-cands", leave=False, dynamic_ncols=True
+    ):
+        # draw a "tiny" batch of training instances
+        _bidxs: th.Tensor = (
+            th.multinomial(
+                th.ones(n_data), num_samples=n_tdata_minibatch, replacement=False
+            )
+            if n_tdata_minibatch < n_data
+            else th.arange(n_data)
+        )
+        _bsz: int = len(_bidxs)
+        _bdata: thd.TensorDict = tdata[_bidxs]
+        _btxs: th.Tensor = _bdata["xs"]
+        _btys: th.Tensor = _bdata["ys"]
+        # each tiny batches are seeded with randomly mutated candidates
+        # add some noise to input candidates, which also prevents nan in logit
+        _bctmpls: th.Tensor = tafalib_makers_candidates.make_template_candidates(
+            n_covs=n_covs,
+            init_fidx=init_fidx,
+            n_cands_targ=n_cands_minibatch,
+            min_features=min_features,
+            max_features=max_features,
+        )
+        _bctmpls = th.where(
+            _bctmpls == 1,
+            _bctmpls - _uniform_like(_bctmpls, 0.1, 0.5),
+            _bctmpls + _uniform_like(_bctmpls, 0.1, 0.5),
+        )
+        # gd works with real, so transofrm indicator to logits
+        _blctmpls: th.Tensor = th.logit(_bctmpls, eps=1e-6).requires_grad_(True)
+        # make optimizer for current batch of data
+        _bopt: th.optim.Optimizer = make_opt_fn([_blctmpls])
+        _bpbar = tqdm.trange(
+            n_gradient_steps_per_mutate_iter,
+            desc="gdmutate-batch",
+            dynamic_ncols=True,
+            leave=False,
+        )
+        for _ in _bpbar:
+            # (_bsz,  n_cands)
+            _brwds_l: list[th.Tensor] = list()
+            with th.autograd.graph.save_on_cpu():
+                for _bbidxs in th.split(
+                    th.cartesian_prod(th.arange(_bsz), th.arange(len(_bctmpls))), bsz
+                ):
+                    _bbctxs: th.Tensor = _btxs[_bbidxs[:, 0], :].to(device=plf.device)
+                    _bblacts: th.Tensor = _blctmpls[_bbidxs[:, 1], :].to(
+                        device=plf.device
+                    )
+                    _bbacts: th.Tensor = th.sigmoid(_bblacts)
+                    _bbpyhats: th.Tensor = classifier.predict_proba(_bbctxs, _bbacts)
+                    # (bsz, )
+                    _bbcels: th.Tensor = th.nn.functional.nll_loss(
+                        th.log(_bbpyhats),
+                        _btys[_bbidxs[:, 0]].to(device=plf.device),
+                        reduction="none",
+                    )
+                    _bbrwds: th.Tensor = -_bbcels - lmbda * th.sum(_bbacts, dim=1)
+                    _brwds_l.append(_bbrwds)
+            _brwds: th.Tensor = th.unflatten(
+                th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_cands_minibatch)
+            )
+            _bloss: th.Tensor = -th.mean(th.max(_brwds, dim=1)[0])
+            _bopt.zero_grad()
+            _bloss.backward()
+            _bopt.step()
+            _bpbar.set_postfix({"loss": _bloss.item()})
+        _blctmpls = _blctmpls.detach_().requires_grad_(False)
+        _bctmpls = th.sigmoid(_blctmpls)
+        _bctmpls = th.where(_bctmpls < 0.5, 0, 1).to(dtype=th.long, device="cpu")
+        _bctmpls[:, init_fidx] = 1
+        ctmpls = (
+            th.unique(_bctmpls, dim=0)
+            if ctmpls is None
+            else th.unique(th.cat((ctmpls, _bctmpls), dim=0), dim=0)
+        )
+        assert ctmpls is not None
+        if len(ctmpls) > n_cands_targ:
+            break
+    assert ctmpls is not None
+    tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+        tmpls=ctmpls,
+        data=(
+            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        ),
+        classifier=classifier,
+        lmbda=lmbda,
+        bsz=bsz,
+        plf=plf,
+    )
+    tmpls, slctd_ms = make_templates_from_candidates(
+        tpcomp=tpcomp,
+        ctmpls=ctmpls,
+        n_tmpls=n_tmpls,
+        plf=plf,
+        log_prefix="vanilla_mkgdtmpl",
+    )
+    if (
+        isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+        and to_update_classifier
+    ):
+        classifier.fit_(tmpls)
     return tmpls
 
 
