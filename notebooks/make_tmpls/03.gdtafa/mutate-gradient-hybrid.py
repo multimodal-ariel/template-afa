@@ -108,6 +108,7 @@ if init_fidx is None:
 
 
 # %%
+@th.enable_grad()
 def _mutate_candidates_with_gradient_descent(
     tdata: thd.TensorDict,
     tmpls_prv: th.Tensor,
@@ -128,11 +129,13 @@ def _mutate_candidates_with_gradient_descent(
     n_data: int = len(tdata)
     n_cands: int = len(tmpls_prv)
     outs: th.Tensor = tmpls_prv.clone().detach_()
-    for _itr in tqdm.trange(n_gradient_mutate_iters, desc="gd-mutate", leave=False):
+    for _itr in tqdm.trange(
+        n_gradient_mutate_iters, desc="gd-mutate", leave=False, dynamic_ncols=True
+    ):
         # draw a "tiny" batch of training instances
         _bidxs: th.Tensor = (
             th.multinomial(th.ones(n_data), num_samples=bsz, replacement=False)
-            if bsz > n_data
+            if bsz < n_data
             else th.arange(n_data)
         )
         _bsz: int = len(_bidxs)
@@ -150,11 +153,14 @@ def _mutate_candidates_with_gradient_descent(
         _blctmpls: th.Tensor = th.logit(_bctmpls, eps=1e-6).requires_grad_(True)
         # make optimizer for current batch of data
         _bopt: th.optim.Optimizer = make_opt_fn([_blctmpls])
-        for _ in range(n_gradient_steps_per_mutate_iter):
-            # (bsz,  n_cands)
-            _brwds: th.Tensor = th.empty(
-                (_bsz, n_cands), dtype=th.float32, requires_grad=True, device=plf.device
-            )
+        for _ in tqdm.trange(
+            n_gradient_steps_per_mutate_iter,
+            desc="gdmutate-batch",
+            dynamic_ncols=True,
+            leave=False,
+        ):
+            # (_bsz,  n_cands)
+            _brwds_l: list[th.Tensor] = list()
             with th.autograd.graph.save_on_cpu():
                 for _bbidxs in th.split(
                     th.cartesian_prod(th.arange(_bsz), th.arange(n_cands)), _bsz
@@ -168,11 +174,14 @@ def _mutate_candidates_with_gradient_descent(
                     # (_bsz, )
                     _bbcels: th.Tensor = th.nn.functional.nll_loss(
                         th.log(_bbpyhats),
-                        _btys[_bidxs[:, 0]].to(device=plf.device),
+                        _btys[_bbidxs[:, 0]].to(device=plf.device),
                         reduction="none",
                     )
                     _bbrwds: th.Tensor = -_bbcels - lmbda * th.sum(_bbacts, dim=1)
-                    _brwds[_bbidxs[:, 0], _bbidxs[:, 1]] = _bbrwds
+                    _brwds_l.append(_bbrwds)
+            _brwds: th.Tensor = th.unflatten(
+                th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_cands)
+            )
             _bloss: th.Tensor = -th.mean(th.max(_brwds, dim=1)[0])
             _bopt.zero_grad()
             _bloss.backward()
@@ -397,7 +406,7 @@ tmpls = make_templates_fix_rounds_with_gradient_descent(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
-    to_update_classifier=True,
+    to_update_classifier=False,
     init_fidx=init_fidx,
     n_tmpls_targ=n_tmpls_targ,
     n_cands_init=n_cands_targ,
@@ -406,7 +415,7 @@ tmpls = make_templates_fix_rounds_with_gradient_descent(
     min_features=min_features_targ,
     max_features=max_features_targ,
     n_rounds=n_rounds,
-    use_feature_importance_sampling=True,
+    use_feature_importance_sampling=use_feature_importance_sampling,
     lmbda=lmbda,
     bsz=bsz,
     make_opt_fn=lambda p: th.optim.SGD(p, lr=lr),
