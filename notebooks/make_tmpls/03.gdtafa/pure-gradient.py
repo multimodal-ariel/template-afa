@@ -10,6 +10,7 @@ import lightning.fabric.loggers as plf_loggers
 import mydatasets
 import mylib
 import mymodels
+import pandas as pd
 import tafalib
 import tensordict as thd
 import torch as th
@@ -124,10 +125,11 @@ def make_vanilla_gradient_descent_templates(
         _bctmpls = th.where(_bctmpls < 0.5, 0, 1).to(dtype=th.long, device="cpu")
         _bctmpls[:, init_fidx] = 1
         ctmpls = (
-            _bctmpls
+            th.unique(_bctmpls, dim=0)
             if ctmpls is None
             else th.unique(th.cat((ctmpls, _bctmpls), dim=0), dim=0)
         )
+        assert ctmpls is not None
         if len(ctmpls) > n_cands_targ:
             break
     assert ctmpls is not None
@@ -224,7 +226,7 @@ metrics_func = thm.MetricCollection(
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "gdtafa-hybrid")
+output_dir: str = os.path.join("outputs", "run", data_name, "vanilla-gdtafa")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -247,7 +249,7 @@ if init_fidx is None:
 
 
 # %%
-tmpls = make_vanilla_gradient_descent_templates(
+tmpls: th.Tensor = make_vanilla_gradient_descent_templates(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
@@ -266,5 +268,97 @@ tmpls = make_vanilla_gradient_descent_templates(
     n_gradient_steps_per_mutate_iter=n_gradient_steps_per_mutate_iter,
     plf=plf,
 )
+
+# %%
+tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz, plf=plf
+)
+
+# %%
+metrics_func = thm.MetricCollection(
+    {
+        "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+        "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+        "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+        "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+        "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+    }
+)
+
+# %%
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
+        x=_data["xs"],
+        classifier=vclassifier,
+        cost_est=lambda x: tafalib.functional.knn_cost_est(
+            x,
+            lmbda=lmbda,
+            txs=tdata["xs"],
+            tcels=tpcomp["cels"],
+            tmpls=tmpls,
+            n_neighs=10,
+            p=2,
+        ),
+        init_fidx=init_fidx,
+        tmpls=tmpls,
+        plf=plf,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "init_fidx": init_fidx,
+        "feature used & observed": th.mean(
+            th.as_tensor(snfobsd_l, dtype=th.float32)
+        ).item(),
+    }
+)
+print(pd.Series(metrics_d))
+
+# %%
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
+        x=_data["xs"],
+        classifier=tclassifier,
+        cost_est=lambda x: tafalib.functional.knn_cost_est(
+            x,
+            lmbda=lmbda,
+            txs=tdata["xs"],
+            tcels=tpcomp["cels"],
+            tmpls=tmpls,
+            n_neighs=10,
+            p=2,
+        ),
+        init_fidx=init_fidx,
+        tmpls=tmpls,
+        plf=plf,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "init_fidx": init_fidx,
+        "feature used & observed": th.mean(
+            th.as_tensor(snfobsd_l, dtype=th.float32)
+        ).item(),
+    }
+)
+print(pd.Series(metrics_d))
 
 # %%
