@@ -21,91 +21,6 @@ OmegaConf.register_new_resolver(
     name="get_cls", resolver=lambda cls: hd.utils.get_class(cls), replace=True
 )
 
-# %%
-# NOTE big5
-data_name: str = "big5_C_cls"
-_tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
-n_covs: int = _tdata["xs"].shape[1]
-n_labels: int = len(th.unique(_tdata["ys"]))
-_tdata_shuffle_idxs = th.randperm(len(_tdata))
-tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
-extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
-run_p: str = (
-    "experiments/pretrain/nnet_subset_feature_classifier/outputs/big5/20250312_224514"
-)
-run_cfg = OmegaConf.load(
-    os.path.join(mylib.utils.get_project_root_dir(), run_p, ".hydra", "config.yaml")
-)
-tclassifier = (
-    mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
-        nnet=hd.utils.instantiate(
-            run_cfg.nnet,
-            in_features=n_covs * 2,
-            out_features=n_labels,
-        ),
-        xs_train=tdata["xs"].numpy(),
-        ys_train=tdata["ys"].numpy(),
-        fit_kwargs=hd.utils.instantiate(run_cfg.nnet_fit_cfg),
-        state_dict_p=os.path.join(
-            mylib.utils.get_project_root_dir(), run_p, "classifier.pt"
-        ),
-    )
-)
-tclassifier.fit_kwargs["n_iter"] = 1000
-tclassifier.fit_kwargs["bsz"] = 8192
-vclassifier = tclassifier
-max_tdata: Optional[int] = None
-init_fidx: int = 35
-n_tmpls_targ: int = 128
-n_cands_targ: int = 10_000
-n_cands_mutate: int = 256
-lmbda: float = 0.075
-min_features_targ: int = 1
-max_features_targ: Optional[int] = None
-min_features_init: int = 10
-n_rounds: int = 3
-feature_decrement: int = 2
-use_feature_importance_sampling: bool = True
-bsz: int = 409600
-lr: float = 1e-2
-n_gradient_mutate_iters: int = 200
-n_gradient_steps_per_mutate_iter: int = 70000
-
-
-# %%
-metrics_func = thm.MetricCollection(
-    {
-        "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
-        "precision": thm.Precision(task="multiclass", num_classes=n_labels),
-        "recall": thm.Recall(task="multiclass", num_classes=n_labels),
-        "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
-        "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
-    }
-)
-
-# %%
-# configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "gdtafa")
-os.makedirs(output_dir, exist_ok=True)
-tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
-csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
-
-# %%
-plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
-
-# %%
-if init_fidx is None:
-    init_fidx, bestfm = tafalib.makers.templates.identify_init_fidx(
-        tdata=tdata,
-        classifier=tclassifier,
-        max_features=max_features_targ,
-        n_repeat=2,
-        n_masks=500,
-        lmbda=lmbda,
-        bsz=bsz,
-        plf=plf,
-    )
-
 
 # %%
 @th.enable_grad()
@@ -153,12 +68,13 @@ def _mutate_candidates_with_gradient_descent(
         _blctmpls: th.Tensor = th.logit(_bctmpls, eps=1e-6).requires_grad_(True)
         # make optimizer for current batch of data
         _bopt: th.optim.Optimizer = make_opt_fn([_blctmpls])
-        for _ in tqdm.trange(
+        _bpbar = tqdm.trange(
             n_gradient_steps_per_mutate_iter,
             desc="gdmutate-batch",
             dynamic_ncols=True,
             leave=False,
-        ):
+        )
+        for _ in _bpbar:
             # (_bsz,  n_cands)
             _brwds_l: list[th.Tensor] = list()
             with th.autograd.graph.save_on_cpu():
@@ -186,6 +102,7 @@ def _mutate_candidates_with_gradient_descent(
             _bopt.zero_grad()
             _bloss.backward()
             _bopt.step()
+            _bpbar.set_postfix({"loss": _bloss.item()})
         _blctmpls = _blctmpls.detach_().requires_grad_(False)
         _bctmpls = th.sigmoid(_blctmpls)
         _bctmpls = th.where(_bctmpls < 0.5, 0, 1).to(dtype=th.long, device="cpu")
@@ -399,6 +316,92 @@ def make_templates_fix_rounds_with_gradient_descent(
             classifier.fit_(tmpls)
     assert tmpls is not None
     return tmpls
+
+
+# %%
+# NOTE big5
+data_name: str = "big5_C_cls"
+_tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+n_covs: int = _tdata["xs"].shape[1]
+n_labels: int = len(th.unique(_tdata["ys"]))
+_tdata_shuffle_idxs = th.randperm(len(_tdata))
+tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
+extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
+run_p: str = (
+    "experiments/pretrain/nnet_subset_feature_classifier/outputs/big5/20250312_224514"
+)
+run_cfg = OmegaConf.load(
+    os.path.join(mylib.utils.get_project_root_dir(), run_p, ".hydra", "config.yaml")
+)
+tclassifier = (
+    mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
+        nnet=hd.utils.instantiate(
+            run_cfg.nnet,
+            in_features=n_covs * 2,
+            out_features=n_labels,
+        ),
+        xs_train=tdata["xs"].numpy(),
+        ys_train=tdata["ys"].numpy(),
+        fit_kwargs=hd.utils.instantiate(run_cfg.nnet_fit_cfg),
+        state_dict_p=os.path.join(
+            mylib.utils.get_project_root_dir(), run_p, "classifier.pt"
+        ),
+    )
+)
+tclassifier.fit_kwargs["n_iter"] = 1000
+tclassifier.fit_kwargs["bsz"] = 8192
+vclassifier = tclassifier
+max_tdata: Optional[int] = None
+init_fidx: int = 35
+n_tmpls_targ: int = 128
+n_cands_targ: int = 10_000
+n_cands_mutate: int = 256
+lmbda: float = 0.075
+min_features_targ: int = 1
+max_features_targ: Optional[int] = None
+min_features_init: int = 10
+n_rounds: int = 3
+feature_decrement: int = 2
+use_feature_importance_sampling: bool = True
+bsz: int = 4096
+lr: float = 1e-1
+n_gradient_mutate_iters: int = 10
+n_gradient_steps_per_mutate_iter: int = 100
+
+
+# %%
+metrics_func = thm.MetricCollection(
+    {
+        "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+        "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+        "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+        "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+        "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+    }
+)
+
+# %%
+# configure logger and ckpt path
+output_dir: str = os.path.join("outputs", "run", data_name, "gdtafa")
+os.makedirs(output_dir, exist_ok=True)
+tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
+csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
+
+# %%
+plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
+
+# %%
+if init_fidx is None:
+    init_fidx, bestfm = tafalib.makers.templates.identify_init_fidx(
+        tdata=tdata,
+        classifier=tclassifier,
+        max_features=max_features_targ,
+        n_repeat=2,
+        n_masks=500,
+        lmbda=lmbda,
+        bsz=bsz,
+        plf=plf,
+    )
 
 
 # %%
