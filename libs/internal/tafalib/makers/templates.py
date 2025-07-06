@@ -698,12 +698,25 @@ def make_vanilla_gradient_descent_templates(
                 th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_cands_minibatch)
             )
             _brwds, _bupdtmpls_idxs = th.max(_brwds, dim=1)
+            _blctmpls_entropy: th.Tensor = (
+                th.distributions.Bernoulli(logits=_blctmpls[_bupdtmpls_idxs])
+                .entropy()
+                .mean()
+            )
             _bloss: th.Tensor = -th.mean(_brwds)
             _bopt.zero_grad()
             _bloss.backward()
             _bopt.step()
-            _bpbar.set_postfix({"loss": _bloss.item()})
-            plf.log_dict({f"gdvanilla/loss@itr{_itr}": _bloss.item()}, step=_step)
+            _bpbar.set_postfix(
+                {"loss": _bloss.item(), "lctmpls_entropy": _blctmpls_entropy.item()}
+            )
+            plf.log_dict(
+                {
+                    f"gdvanilla/loss@itr{_itr}": _bloss.item(),
+                    f"gdvanilla/lctmpls_entropy@itr{_itr}": _blctmpls_entropy.item(),
+                },
+                step=_step,
+            )
             # keep track of which templates are updated
             _bctmplidxs_set.update(th.unique(_bupdtmpls_idxs).tolist())
         _blctmpls = _blctmpls.detach_().requires_grad_(False)
