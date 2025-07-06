@@ -632,9 +632,10 @@ def make_vanilla_gradient_descent_templates(
     n_covs: int = tdata["xs"].shape[1]
     # use gradient descent to construct high quality templates
     ctmpls: th.Tensor | None = None
-    for _itr in tqdm.trange(
+    pbar = tqdm.trange(
         n_gradient_mutate_iters, desc="gd-cands", leave=False, dynamic_ncols=True
-    ):
+    )
+    for _itr in pbar:
         # draw a "tiny" batch of training instances
         _bidxs: th.Tensor = (
             th.multinomial(
@@ -671,7 +672,8 @@ def make_vanilla_gradient_descent_templates(
             dynamic_ncols=True,
             leave=False,
         )
-        for _ in _bpbar:
+        _bctmplidxs_set: set[int] = set()
+        for _step in _bpbar:
             # (_bsz,  n_cands)
             _brwds_l: list[th.Tensor] = list()
             with th.autograd.graph.save_on_cpu():
@@ -695,13 +697,22 @@ def make_vanilla_gradient_descent_templates(
             _brwds: th.Tensor = th.unflatten(
                 th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_cands_minibatch)
             )
-            _bloss: th.Tensor = -th.mean(th.max(_brwds, dim=1)[0])
+            _brwds, _bupdtmpls_idxs = th.max(_brwds, dim=1)
+            _bloss: th.Tensor = -th.mean(_brwds)
             _bopt.zero_grad()
             _bloss.backward()
             _bopt.step()
             _bpbar.set_postfix({"loss": _bloss.item()})
+            plf.log_dict({f"gdvanilla/loss@itr{_itr}": _bloss.item()}, step=_step)
+            # keep track of which templates are updated
+            _bctmplidxs_set.update(th.unique(_bupdtmpls_idxs).tolist())
         _blctmpls = _blctmpls.detach_().requires_grad_(False)
+        # those never get touched by gradient descent are bad candidates
+        # choose only those that have actually been touched by gradient descent
+        _blctmpls = _blctmpls[list(_bctmplidxs_set)]
+        # from logits back to feature masks
         _bctmpls = th.sigmoid(_blctmpls)
+        # make it feauture masks
         _bctmpls = th.where(_bctmpls < 0.5, 0, 1).to(dtype=th.long, device="cpu")
         _bctmpls[:, init_fidx] = 1
         ctmpls = (
@@ -710,9 +721,28 @@ def make_vanilla_gradient_descent_templates(
             else th.unique(th.cat((ctmpls, _bctmpls), dim=0), dim=0)
         )
         assert ctmpls is not None
+        pbar.set_postfix({"len": len(ctmpls)})
+        plf.log_dict({"gdvanilla/len(ctmpls)": len(ctmpls)}, step=_itr)
         if len(ctmpls) > n_cands_targ:
             break
     assert ctmpls is not None
+    # fill remaining holes with random templates
+    fcs_sets_by_bins: list[set[tuple[int, ...]]] = _fill_fcs_set_with_random_tmpls(
+        fcs_set={tuple(_c.tolist()) for _c in ctmpls},
+        n_covs=n_covs,
+        init_fidx=init_fidx,
+        n_cands_targ=n_cands_targ,
+        min_features=min_features,
+        max_features=max_features,
+        prv_featcounts=None,
+    )
+    # from fcomb to act
+    fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
+    n_cands: int = len(fcs_l)
+    ctmpls = th.zeros((n_cands, n_covs), dtype=th.long)
+    for _i, _fc in enumerate(fcs_l):
+        ctmpls[_i, _fc] = 1
+    # compute rewards for each instance using each of the candidates
     tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
         tmpls=ctmpls,
         data=(
@@ -725,6 +755,7 @@ def make_vanilla_gradient_descent_templates(
         bsz=bsz,
         plf=plf,
     )
+    # choose a collection of templates from candidates
     tmpls, slctd_ms = make_templates_from_candidates(
         tpcomp=tpcomp,
         ctmpls=ctmpls,
