@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+import networkx as nx
 import torch as th
 
 
@@ -154,6 +155,271 @@ def make_template_candidates(
     # from fcomb to act
     ctmpls: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
+    assert len(ctmpls) == len(fcs_l)
+    for _i, _fc in enumerate(fcs_l):
+        ctmpls[_i, _fc] = 1
+    return ctmpls
+
+
+@th.no_grad()
+def make_inter_correlation_template_candidates(
+    xs: th.Tensor,
+    init_fidx: int,
+    n_cands_targ: int,
+    min_features: int,
+    max_features: Optional[int],
+    corr_thrsh: float,
+) -> th.Tensor:
+    n_covs: int = xs.shape[1]
+    # from fcomb to act
+    ctmpls: th.Tensor = _make_inter_corr_candidates(
+        xs=xs,
+        init_fidx=init_fidx,
+        n_cands_targ=n_cands_targ,
+        min_features=min_features,
+        max_features=max_features,
+        corr_thrsh=corr_thrsh,
+    )
+    ctmpls = th.unique(ctmpls, dim=0)
+    if len(ctmpls) < n_cands_targ:
+        ctmpls = th.unique(
+            th.cat(
+                (
+                    ctmpls,
+                    make_template_candidates(
+                        n_covs=n_covs,
+                        init_fidx=init_fidx,
+                        n_cands_targ=n_cands_targ - len(ctmpls),
+                        min_features=min_features,
+                        max_features=max_features,
+                    ),
+                ),
+                dim=0,
+            ),
+            dim=0,
+        )
+    return ctmpls
+
+
+@th.no_grad()
+def make_intra_correlation_template_candidates(
+    xs: th.Tensor,
+    init_fidx: int,
+    n_cands_targ: int,
+    min_features: int,
+    max_features: Optional[int],
+    corr_thrsh: float,
+) -> th.Tensor:
+    n_covs: int = xs.shape[1]
+    # from fcomb to act
+    ctmpls: th.Tensor = _make_intra_corr_candidates(
+        xs=xs,
+        init_fidx=init_fidx,
+        n_cands_targ=n_cands_targ,
+        min_features=min_features,
+        max_features=max_features,
+        corr_thrsh=corr_thrsh,
+    )
+    ctmpls = th.unique(ctmpls, dim=0)
+    if len(ctmpls) < n_cands_targ:
+        ctmpls = th.unique(
+            th.cat(
+                (
+                    ctmpls,
+                    make_template_candidates(
+                        n_covs=n_covs,
+                        init_fidx=init_fidx,
+                        n_cands_targ=n_cands_targ - len(ctmpls),
+                        min_features=min_features,
+                        max_features=max_features,
+                    ),
+                ),
+                dim=0,
+            ),
+            dim=0,
+        )
+    return ctmpls
+
+
+@th.no_grad()
+def make_inter_intra_correlation_template_candidates(
+    xs: th.Tensor,
+    init_fidx: int,
+    n_cands_targ: int,
+    min_features: int,
+    max_features: Optional[int],
+    corr_thrsh: float,
+) -> th.Tensor:
+    n_covs: int = xs.shape[1]
+    # from fcomb to act
+    ctmpls: th.Tensor = th.cat(
+        (
+            _make_inter_corr_candidates(
+                xs=xs,
+                init_fidx=init_fidx,
+                n_cands_targ=n_cands_targ // 2,
+                min_features=min_features,
+                max_features=max_features,
+                corr_thrsh=corr_thrsh,
+            ),
+            _make_intra_corr_candidates(
+                xs=xs,
+                init_fidx=init_fidx,
+                n_cands_targ=n_cands_targ // 2,
+                min_features=min_features,
+                max_features=max_features,
+                corr_thrsh=corr_thrsh,
+            ),
+        )
+    )
+    ctmpls = th.unique(ctmpls, dim=0)
+    if len(ctmpls) < n_cands_targ:
+        ctmpls = th.unique(
+            th.cat(
+                (
+                    ctmpls,
+                    make_template_candidates(
+                        n_covs=n_covs,
+                        init_fidx=init_fidx,
+                        n_cands_targ=n_cands_targ - len(ctmpls),
+                        min_features=min_features,
+                        max_features=max_features,
+                    ),
+                ),
+                dim=0,
+            ),
+            dim=0,
+        )
+    return ctmpls
+
+
+# NOTE just make correlation based templates adn does not fill remaining request with rand cands.
+@th.no_grad()
+def _make_inter_corr_candidates(
+    xs: th.Tensor,
+    init_fidx: int,
+    n_cands_targ: int,
+    min_features: int,
+    max_features: Optional[int],
+    corr_thrsh: float,
+) -> th.Tensor:
+    n_covs: int = xs.shape[1]
+    # compute feature correlation
+    # (n_covs, n_covs)
+    corrs: th.Tensor = th.corrcoef(xs).abs_()
+    # construct feature relation graph based on correlation matrix
+    fg = nx.Graph()
+    fg.add_nodes_from(range(n_covs))
+    for _i in range(n_covs):
+        for _j in range(_i + 1, n_covs):
+            if corrs[_i, _j] >= corr_thrsh:
+                fg.add_edge(_i, _j)
+    # get rid of initial feature
+    fg.remove_node(init_fidx)
+    # gather features from each group
+    gfidxs: list[tuple[int, ...]] = [
+        tuple(sorted([*_curr_gfidxs])) for _curr_gfidxs in nx.connected_components(fg)
+    ]
+    fcs_s: set[tuple[int, ...]] = set()
+    n_groups: int = len(gfidxs)
+    # add feature subset to candidates
+    for _ in range(5 * n_cands_targ):
+        # choose some groups to draw features from
+        _gids: th.Tensor = th.multinomial(
+            th.ones((n_groups,)),
+            num_samples=int(th.randint(0, n_groups, ()).item()) + 1,
+            replacement=False,
+        )
+        _gids = _gids[th.randperm(len(_gids))]
+        _fc_l: list[int] = list()
+        for _gid in _gids:
+            _idxs: th.Tensor = th.multinomial(
+                th.ones((len(gfidxs[_gid]))),
+                num_samples=int(th.randint(0, len(gfidxs[_gid]), ()).item()) + 1,
+                replacement=False,
+            )
+            _fc_l.extend(th.as_tensor(gfidxs[_gid])[_idxs].tolist())
+        # ensure max features
+        _fc_l = th.as_tensor(_fc_l)[th.randperm(len(_fc_l))].tolist()
+        if max_features is not None and max_features - 1 < len(_fc_l):
+            _fc_l = _fc_l[:max_features]
+        _fc_l.append(init_fidx)
+        fcs_s.add(tuple(sorted(_fc_l)))
+        # ensure n_cands_targ is
+        if len(fcs_s) >= n_cands_targ:
+            break
+    fcs_l: list[tuple[int, ...]] = list(
+        filter(lambda _x: min_features <= len(_x), fcs_s)
+    )
+    # from fcomb to act
+    ctmpls: th.Tensor = th.zeros((len(fcs_s), n_covs), dtype=th.long)
+    assert len(ctmpls) == len(fcs_l)
+    for _i, _fc in enumerate(fcs_l):
+        ctmpls[_i, _fc] = 1
+    return ctmpls
+
+
+@th.no_grad()
+def _make_intra_corr_candidates(
+    xs: th.Tensor,
+    init_fidx: int,
+    n_cands_targ: int,
+    min_features: int,
+    max_features: Optional[int],
+    corr_thrsh: float,
+) -> th.Tensor:
+    n_covs: int = xs.shape[1]
+    # compute feature correlation
+    # (n_covs, n_covs)
+    corrs: th.Tensor = th.corrcoef(xs).abs_()
+    # construct feature relation graph based on correlation matrix
+    fg = nx.Graph()
+    fg.add_nodes_from(range(n_covs))
+    for _i in range(n_covs):
+        for _j in range(_i + 1, n_covs):
+            if corrs[_i, _j] >= corr_thrsh:
+                fg.add_edge(_i, _j)
+    # get rid of initial feature
+    fg.remove_node(init_fidx)
+    # gather features from each group
+    gfidxs: list[tuple[int, ...]] = [
+        tuple(sorted([*_curr_gfidxs])) for _curr_gfidxs in nx.connected_components(fg)
+    ]
+    fcs_s: set[tuple[int, ...]] = set()
+    n_groups: int = len(gfidxs)
+    # add feature subset to candidates
+    for _ in range(5 * n_cands_targ):
+        # choose some groups to draw features from
+        _gids: th.Tensor = th.multinomial(
+            th.ones((n_groups,)),
+            num_samples=int(th.randint(0, n_groups, ()).item()) + 1,
+            replacement=False,
+        )
+        _gids = _gids[th.randperm(len(_gids))]
+        _fc_l: list[int] = list()
+        for _gid in _gids:
+            _idxs: th.Tensor = th.multinomial(
+                th.ones((len(gfidxs[_gid]))),
+                num_samples=int(th.randint(0, len(gfidxs[_gid]), ()).item()) + 1,
+                replacement=False,
+            )
+            _fc_l.extend(th.as_tensor(gfidxs[_gid])[_idxs].tolist())
+            if len(gfidxs[_gid]) > 3:
+                break
+        # ensure max features
+        _fc_l = th.as_tensor(_fc_l)[th.randperm(len(_fc_l))].tolist()
+        if max_features is not None and max_features - 1 < len(_fc_l):
+            _fc_l = _fc_l[:max_features]
+        _fc_l.append(init_fidx)
+        fcs_s.add(tuple(sorted(_fc_l)))
+        # ensure n_cands_targ is
+        if len(fcs_s) >= n_cands_targ:
+            break
+    fcs_l: list[tuple[int, ...]] = list(
+        filter(lambda _x: min_features <= len(_x), fcs_s)
+    )
+    # from fcomb to act
+    ctmpls: th.Tensor = th.zeros((len(fcs_s), n_covs), dtype=th.long)
     assert len(ctmpls) == len(fcs_l)
     for _i, _fc in enumerate(fcs_l):
         ctmpls[_i, _fc] = 1
