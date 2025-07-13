@@ -782,6 +782,7 @@ def make_vanilla_gradient_descent_templates(
                 th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_cands_minibatch)
             )
             _brwds, _bupdtmpls_idxs = th.max(_brwds, dim=1)
+            _bupdtmpls_idxs = _bupdtmpls_idxs.to(device="cpu")
             _blctmpls_entropy: th.Tensor = (
                 th.distributions.Bernoulli(logits=_blctmpls[_bupdtmpls_idxs])
                 .entropy()
