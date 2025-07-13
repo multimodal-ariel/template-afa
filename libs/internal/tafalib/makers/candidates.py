@@ -248,7 +248,8 @@ def make_inter_intra_correlation_template_candidates(
     n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
-    corr_thrsh: float,
+    inter_corr_thrsh: float,
+    intra_corr_thrsh: float,
 ) -> th.Tensor:
     n_covs: int = xs.shape[1]
     # from fcomb to act
@@ -260,7 +261,7 @@ def make_inter_intra_correlation_template_candidates(
                 n_cands_targ=n_cands_targ // 2,
                 min_features=min_features,
                 max_features=max_features,
-                corr_thrsh=corr_thrsh,
+                corr_thrsh=inter_corr_thrsh,
             ),
             _make_intra_corr_candidates(
                 xs=xs,
@@ -268,7 +269,7 @@ def make_inter_intra_correlation_template_candidates(
                 n_cands_targ=n_cands_targ // 2,
                 min_features=min_features,
                 max_features=max_features,
-                corr_thrsh=corr_thrsh,
+                corr_thrsh=intra_corr_thrsh,
             ),
         )
     )

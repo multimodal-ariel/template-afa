@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from functools import partial
 from typing import Optional
 
 import _classifiers
@@ -10,7 +11,6 @@ import lightning as pl
 import lightning.fabric.loggers as plf_loggers
 import mydatasets
 import mymodels
-import networkx as nx
 import pandas as pd
 import tafalib
 import tensordict as thd
@@ -24,90 +24,6 @@ OmegaConf.register_new_resolver(
 
 # %%
 PROJ_ROOT: str = "../../../"
-
-
-# %%
-# NOTE make templates from scratch
-@th.no_grad()
-def make_corr_templates(
-    tdata: thd.TensorDict,
-    max_tdata: Optional[int],
-    classifier: mymodels.classifiers.SubsetFeatureClassifier,
-    to_update_classifier: bool,
-    init_fidx: int,
-    n_tmpls: int,
-    n_cands: int,
-    min_features: int,
-    max_features: Optional[int],
-    corr_thrsh: float,
-    lmbda: float,
-    bsz: int,
-    plf: pl.Fabric,
-) -> th.Tensor:
-    """make templates greedily
-
-    Args:
-        tdata (thd.TensorDict): (n, ) training data
-        max_tdata (Optional[int]): optional maximum training data to subsample if training data is too large and takes too long to complete
-        classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier to use
-        to_update_classifier (bool): to update subset feature classifier when a new collection of templates is generated and before the final collection of templates is found.
-        init_fidx (int): initial feature index
-        n_tmpls (int): number of templates to return
-        n_cands (int): number of candidates used to search
-        min_features (int): minimum number of features to include in each template; must be greater than 1.
-        max_features (Optional[int]): maximum number of features to include in each template; if `None`, `n_covs` is used.
-        lmbda (float): penalty term for choosing more features.
-        bsz (int): batch size for evaluating candidates
-        plf (pl.Fabric): lightning fabric instance
-
-    Returns:
-        th.Tensor: (n_tmpls, n_covs)
-    """
-    classifier.to(device=plf.device)
-    n_covs: int = classifier.n_covs
-    max_features = n_covs if max_features is None else max_features
-    # NOTE init. candidate templates
-    ctmpls: th.Tensor = (
-        tafalib.makers.candidates.make_inter_correlation_template_candidates(
-            xs=tdata["xs"],
-            init_fidx=init_fidx,
-            n_cands_targ=n_cands,
-            min_features=min_features,
-            max_features=max_features,
-            corr_thrsh=corr_thrsh,
-        )
-    )
-    if (
-        isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
-        and to_update_classifier
-    ):
-        classifier.fit_(ctmpls)
-    tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
-        tmpls=ctmpls,
-        data=(
-            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
-            if max_tdata is not None and max_tdata < len(tdata)
-            else tdata
-        ),
-        classifier=classifier,
-        lmbda=lmbda,
-        bsz=bsz,
-        plf=plf,
-    )
-    tmpls, slctd_ms = tafalib.makers.templates.make_templates_from_candidates(
-        tpcomp=tpcomp,
-        ctmpls=ctmpls,
-        n_tmpls=n_tmpls,
-        plf=plf,
-        log_prefix="corr-mktmpl",
-    )
-    if (
-        isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
-        and to_update_classifier
-    ):
-        classifier.fit_(tmpls)
-    return tmpls
-
 
 # %%
 # NOTE big5
@@ -223,7 +139,7 @@ if init_fidx is None:
     )
 
 # %%
-tmpls = make_corr_templates(
+tmpls = tafalib.makers.templates.make_greedy_correlation_templates(
     tdata=tdata,
     max_tdata=max_tdata,
     classifier=tclassifier,
@@ -233,7 +149,10 @@ tmpls = make_corr_templates(
     n_cands=n_cands_targ,
     min_features=1,
     max_features=max_features_targ,
-    corr_thrsh=0.3,
+    make_candidates_fn=partial(
+        tafalib.makers.candidates.make_inter_correlation_template_candidates,
+        corr_thrsh=0.3,
+    ),
     lmbda=lmbda,
     bsz=bsz,
     plf=plf,

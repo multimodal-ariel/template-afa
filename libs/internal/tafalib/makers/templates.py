@@ -142,6 +142,90 @@ def make_templates_vanilla(
 
 
 @th.no_grad()
+def make_greedy_correlation_templates(
+    tdata: thd.TensorDict,
+    max_tdata: Optional[int],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    to_update_classifier: bool,
+    init_fidx: int,
+    n_tmpls: int,
+    n_cands: int,
+    min_features: int,
+    max_features: Optional[int],
+    make_candidates_fn: Callable[[th.Tensor, int, int, int, int], th.Tensor],
+    lmbda: float,
+    bsz: int,
+    plf: pl.Fabric,
+) -> th.Tensor:
+    """
+    Generates correlation-based templates using a classifier and candidate template generator.
+    This function creates candidate templates from input data, optionally updates the classifier,
+    precomputes rewards for the templates, selects the best templates, and returns them. It supports
+    limiting the number of data samples used, updating the classifier before and after template selection,
+    and customizing candidate generation.
+
+    Args:
+        tdata (thd.TensorDict): Input data as a TensorDict containing features and possibly labels.
+        max_tdata (Optional[int]): Maximum number of data samples to use. If None, use all data.
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): Classifier used for template evaluation.
+        to_update_classifier (bool): Whether to update (fit) the classifier with candidate/final templates.
+        init_fidx (int): Initial feature index for candidate generation.
+        n_tmpls (int): Number of templates to select and return.
+        n_cands (int): Number of candidate templates to generate.
+        min_features (int): Minimum number of features per candidate template.
+        max_features (Optional[int]): Maximum number of features per candidate template. If None, uses classifier's n_covs.
+        make_candidates_fn (Callable[[th.Tensor, int, int, int, int], th.Tensor]): Function to generate candidate templates.
+        lmbda (float): Regularization or weighting parameter for reward computation.
+        bsz (int): Batch size for processing.
+        plf (pl.Fabric): Fabric object specifying device and distributed settings.
+
+    Returns:
+        th.Tensor: Selected templates as a tensor.
+    """
+    classifier.to(device=plf.device)
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    # NOTE init. candidate templates
+    ctmpls: th.Tensor = make_candidates_fn(
+        xs=tdata["xs"],
+        init_fidx=init_fidx,
+        n_cands_targ=n_cands,
+        min_features=min_features,
+        max_features=max_features,
+    )
+    if (
+        isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+        and to_update_classifier
+    ):
+        classifier.fit_(ctmpls)
+    tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+        tmpls=ctmpls,
+        data=(
+            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        ),
+        classifier=classifier,
+        lmbda=lmbda,
+        bsz=bsz,
+        plf=plf,
+    )
+    tmpls, slctd_ms = make_templates_from_candidates(
+        tpcomp=tpcomp,
+        ctmpls=ctmpls,
+        n_tmpls=n_tmpls,
+        plf=plf,
+        log_prefix="corr-mktmpl",
+    )
+    if (
+        isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+        and to_update_classifier
+    ):
+        classifier.fit_(tmpls)
+    return tmpls
+
+
+@th.no_grad()
 def make_templates_reduce_features(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
