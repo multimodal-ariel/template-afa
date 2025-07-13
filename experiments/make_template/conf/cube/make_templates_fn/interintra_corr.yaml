@@ -1,0 +1,12 @@
+_target_: tafalib.makers.templates.make_greedy_correlation_templates
+max_tdata: null
+n_tmpls: 64
+n_cands: 10_000
+min_features: 1
+max_features: null
+make_candidates_fn:
+  _partial_: true
+  _target_: tafalib.makers.candidates.make_intra_correlation_template_candidates
+  inter_corr_thrsh: 0.3
+  intra_corr_thrsh: 0.3
+to_update_classifier: false
