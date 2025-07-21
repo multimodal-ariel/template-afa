@@ -19,6 +19,7 @@ def _preprocess_data(
     num_bins: int = 100,
     size_normal: float = 0.0,
     ratio_uniform: float = 0.0,
+    rseed: int = 279,
 ) -> tuple[thd.TensorDict, thd.TensorDict, thd.TensorDict]:
     n_covs: int = tdata["xs"].shape[1]
     n_cont_feats: int = data_dict["num_con_features"]
@@ -31,6 +32,7 @@ def _preprocess_data(
         num_bins=num_bins,
         size_normal=size_normal,
         ratio_uniform=ratio_uniform,
+        rseed=rseed,
     )
     empirical_cdf.fit(tdata["xs"][:, :n_cont_feats], tms[:, :n_cont_feats])
     txs_cdf: th.Tensor = empirical_cdf.transform(

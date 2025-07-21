@@ -7,7 +7,6 @@ repeated code in the dataset scripts.
 """
 
 import os
-from typing import Any, Optional
 
 import torch as th
 
@@ -53,10 +52,17 @@ class VectorEmpiricalCDF:
                     the cdf from losing some of the spatial information.
     """
 
-    def __init__(self, num_bins=200, size_normal=1e-5, ratio_uniform=0.1):
+    def __init__(
+        self,
+        num_bins=200,
+        size_normal=1e-5,
+        ratio_uniform=0.1,
+        rseed: int = 279,
+    ):
         self.num_bins = num_bins
         self.size_normal = size_normal
         self.ratio_uniform = ratio_uniform
+        self.rseed = rseed
 
     def linspace_batched(self, start, stop, steps):
         ints = (th.arange(steps)).unsqueeze(0)
@@ -64,6 +70,7 @@ class VectorEmpiricalCDF:
         return start.unsqueeze(-1) + dx * ints
 
     def fit(self, x, mask=None):
+        rg = th.Generator().manual_seed(self.rseed)
         # If we have missing values we sample from the real data to fill them in.
         # This is acceptable since the CDFs are used to find quantiles, and each
         # feature is treated independently.
@@ -80,13 +87,13 @@ class VectorEmpiricalCDF:
                 x[:, f] = m_tmp * x[:, f] + (1 - m_tmp) * sampled_real_x
 
         # Add normal noise.
-        x = x + th.randn(size=x.shape) * self.size_normal
+        x = x + th.randn(size=x.shape, generator=rg) * self.size_normal
 
         # Concatenate uniform data.
         min = th.min(x, dim=0)[0]
         max = th.max(x, dim=0)[0]
         uniform_data = (max - min) * th.rand(
-            size=(int(self.ratio_uniform * x.shape[0]), x.shape[-1])
+            size=(int(self.ratio_uniform * x.shape[0]), x.shape[-1]), generator=rg
         ) + min
         x = th.cat([x, uniform_data], dim=0)
 
@@ -179,12 +186,15 @@ def preprocess_and_save_data(
     num_bins=100,
     size_normal=0.0,
     ratio_uniform=0.0,
+    rseed: int = 279,
 ):
     # Common function to preprocess and save all data to avoid repeated code.
 
     # Shuffle (if required) and split into train, val, test.
     if shuffle:
-        shuffle_ids = th.randperm(X.shape[0])
+        shuffle_ids = th.randperm(
+            X.shape[0], generator=th.Generator().manual_seed(rseed)
+        )
         X = X[shuffle_ids]
         y = y[shuffle_ids]
 
@@ -233,7 +243,10 @@ def preprocess_and_save_data(
     # Preprocess the continuous features.
     # CDF normalize the continuous features.
     empirical_cdf = VectorEmpiricalCDF(
-        num_bins=num_bins, size_normal=size_normal, ratio_uniform=ratio_uniform
+        num_bins=num_bins,
+        size_normal=size_normal,
+        ratio_uniform=ratio_uniform,
+        rseed=rseed,
     )
     empirical_cdf.fit(X_con_train, M_con_train)
     X_con_train_cdf = empirical_cdf.transform(X_con_train, M_con_train)
