@@ -50,7 +50,7 @@ path = os.path.join(
 os.makedirs(path, exist_ok=True)
 
 # %%
-plf = pl.Fabric()
+plf = pl.Fabric(accelerator="cpu")
 
 # %%
 # Get predictive metric function.
@@ -90,6 +90,9 @@ def get_aucs(config):
 hyperparams_dict = sefalib.experiments.tuning.trial_hyperparams.trial_hyperparams[
     model_name
 ][configs_sequence]
+hyperparams_dict = copy.deepcopy(hyperparams_dict)
+# for _k in hyperparams_dict:
+#     hyperparams_dict[_k]["batchsize"] =
 hyperparams_dict_no_dataset = copy.deepcopy(hyperparams_dict)
 aucs_dict = {}
 for key in hyperparams_dict.keys():
