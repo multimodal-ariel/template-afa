@@ -6,6 +6,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+import _policy
 import _utils
 import hydra as hd
 import lightning as pl
@@ -44,18 +45,6 @@ OmegaConf.register_new_resolver(
 )
 
 
-class SKLClassifierPolicy:
-    def __init__(self, sklc, n_covs: int):
-        self.sklc, self.n_covs = sklc, n_covs
-
-    def act(self, state_vec, training=False, epsilon=0.1) -> int:
-
-        probs = self.sklc.predict_proba(state_vec.unsqueeze(0).cpu().numpy())[0]
-
-        best = int(np.argmax(probs))
-        return best
-
-
 def _get_mktmpl_run_dir(cfg: MainConf) -> str:
     if hasattr(cfg, "mktmpl_run") and cfg.mktmpl_run is not None:
         return cfg.mktmpl_run
@@ -79,7 +68,7 @@ def _dagger_fit(
     plf: pl.Fabric,
     ckpt_p: Optional[str] = None,
     save_ckpt_every_n_iter: int = 1,
-) -> dict[str, SKLClassifierPolicy]:
+) -> dict[str, _policy.SKLClassifierPolicy]:
     student = dict()
     best_student = None
     buffer_state = {f"{float(idx)}": [] for idx in range(tmpls.shape[1])}
@@ -128,7 +117,7 @@ def _dagger_fit(
                     actions = np.append(actions, a)
                     weights = np.append(weights, 1e-6)
             _single_sklc.fit(states, actions)  # , sample_weight=weights
-            _single_student = SKLClassifierPolicy(_single_sklc, tmpls.shape[1])
+            _single_student = _policy.SKLClassifierPolicy(_single_sklc, tmpls.shape[1])
             student[f"{_cardinality}"] = _single_student
         # cross validation with 3rd holdout train set
         metrics_func.reset()
@@ -259,7 +248,7 @@ def main(cfg: MainConf):
         }
     )
     # dagger fit
-    best_student: dict[str, SKLClassifierPolicy] = _dagger_fit(
+    best_student: dict[str, _policy.SKLClassifierPolicy] = _dagger_fit(
         tdata=tdata,
         tvdata=extdata,
         classifier=tclassifier,
@@ -272,7 +261,7 @@ def main(cfg: MainConf):
             n_neighs=mktmpl_cfg.n_neighs,
             p=2,
         ),
-        make_classifier_fn=hd.utils.instantiate(cfg.sklc, partial=True),
+        make_classifier_fn=hd.utils.instantiate(cfg.sklc, _partial_=True),
         init_fidx=mktmpl_cfg.init_fidx,
         lmbda=mktmpl_cfg.lmbda,
         tmpls=tmpls,
