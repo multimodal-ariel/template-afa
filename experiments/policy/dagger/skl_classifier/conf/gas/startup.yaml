@@ -12,9 +12,7 @@ hydra:
 #   exp_p: str
 #   run_id: int
 # mktmpl_run: str
-sklc:
-  _target_: sklearn.tree.DecisionTreeClassifier
-  max_leaf_nodes: 512
+# sklc:
 n_iter: 10
 save_ckpt_every_n_iter: 100
 plf:

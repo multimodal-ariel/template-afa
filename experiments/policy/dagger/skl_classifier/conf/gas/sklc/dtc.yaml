@@ -1,0 +1,2 @@
+  _target_: sklearn.tree.DecisionTreeClassifier
+  max_leaf_nodes: 512
