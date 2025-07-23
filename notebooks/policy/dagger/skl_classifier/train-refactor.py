@@ -261,7 +261,7 @@ def _dagger_fit(
             best_student = student
             pbar.set_postfix(
                 {
-                    "best": _obj,
+                    "best": _obj.item(),
                     "_itr": _itr,
                 }
             )
@@ -291,7 +291,7 @@ max_leaf_nodes = 256
 # %%
 best_student = _dagger_fit(
     tdata=tdata,
-    tvdata=tstdata,
+    tvdata=extdata,
     classifier=tclassifier,
     teacher_cost_est=lambda x: tafalib.functional.knn_cost_est(
         x,
