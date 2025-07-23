@@ -126,8 +126,17 @@ class BaseModel(nn.Module):
             min_lr=min_lr,
             patience=self.patience,
         )
-        train_loader = DataLoader(train_data, batch_size=self.batchsize, shuffle=True)
-        val_loader = DataLoader(val_data, batch_size=len(val_data), shuffle=False)
+        train_loader = DataLoader(
+            train_data,
+            batch_size=self.batchsize,
+            shuffle=True,
+            drop_last=True,
+        )
+        val_loader = DataLoader(
+            val_data,
+            batch_size=len(val_data),
+            shuffle=False,
+        )
 
         # Try to load in a checkpoint.
         try:
