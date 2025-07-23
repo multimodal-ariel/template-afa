@@ -1,0 +1,22 @@
+hydra:
+  job:
+    name: cube
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+# TODO override one of these
+# mktmpl_exp:
+#   exp_p: str
+#   run_id: int
+# mktmpl_run: str
+sklc:
+  _target_: sklearn.tree.DecisionTreeClassifier
+  max_leaf_nodes: 512
+n_iter: 10
+save_ckpt_every_n_iter: 100
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
