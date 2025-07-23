@@ -337,7 +337,7 @@ metrics_d = _utils.evaluate(
     training=False,
     lmbda=mktmpl_cfg.lmbda,
 )[0]
-print(metrics_d)
+print(pd.Series(metrics_d))
 plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "eval"))
 # logger flush record and close
 tfb_logger.finalize("success")
