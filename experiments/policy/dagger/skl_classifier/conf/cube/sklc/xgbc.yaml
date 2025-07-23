@@ -1,0 +1,2 @@
+_target_: xgboost.XGBClassifier
+n_estimators: 40
