@@ -13,6 +13,7 @@ import lightning.fabric.loggers as plf_loggers
 import mylib
 import mymodels
 import numpy as np
+import sklearn.base as skl_base
 import tafalib
 import tensordict as thd
 import torch as th
@@ -67,7 +68,9 @@ def _dagger_fit(
     tvdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     teacher_cost_est: Callable[[th.Tensor], th.Tensor],
-    make_classifier_fn: Callable[[], mymodels.protocols.SklModule],
+    make_classifier_fn: Callable[
+        [], mymodels.protocols.SklModule | skl_base.BaseEstimator
+    ],
     init_fidx: int,
     lmbda: float,
     tmpls: th.Tensor,
