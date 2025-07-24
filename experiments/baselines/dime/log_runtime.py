@@ -25,6 +25,7 @@ from omegaconf import OmegaConf
 class MainConf:
     train_exp: Optional[MakeTemplateExpConf]
     train_run: Optional[str]
+    n_instances: int
     lmbda: float
     trainer: Any
 
@@ -56,6 +57,7 @@ def main(cfg: MainConf):
     )
     # make dataset
     tdata, vdata, tstdata = hd.utils.call(run_cfg.data)
+    vdata = vdata[: cfg.n_instances]
     n_covs: int = tdata["xs"].shape[1]
     n_labels: int = len(th.unique(tdata["ys"]))
     # make dataloader
