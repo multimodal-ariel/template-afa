@@ -162,6 +162,7 @@ def to_jafa_datatmp(data: thd.TensorDict, shuffle: bool) -> jafalib.data_temp.Da
 
 
 def _jafa_test_runtime(
+    run_p: str,
     step_runner: jafalib.main.StepRunner,
     args,
     env: jafalib.environment.Env,
@@ -214,16 +215,17 @@ def _jafa_test_runtime(
     field = sorted_argskey + field
     result.update(argsdict)
     file_exists = os.path.isfile(args.csv_path + ".csv")
-    with open(args.csv_path + ".csv", "a+") as csvfile:
+    with open(os.path.join(run_p, "metrics.csv"), "a+") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=field)
         if not file_exists:
             writer.writeheader()
         writer.writerow(result)
-    with open(args.csv_path + ".pkl", mode="wb") as f:
+    with open(os.path.join(run_p, "result.pkl"), mode="wb") as f:
         pkl.dump(tstresults_l, f)
 
 
 def jafa_log_runtime(
+    run_p: str,
     args,
     traindata: jafalib.data_temp.DataTemp,
     valdata: jafalib.data_temp.DataTemp,
@@ -297,7 +299,7 @@ def jafa_log_runtime(
     )
     valenv.classify = step_runner.classify
     dfsnet.eval()
-    _jafa_test_runtime(step_runner, args, env, valenv)
+    _jafa_test_runtime(run_p, step_runner, args, env, valenv)
 
 
 def _get_run_dir(cfg: MainConf) -> str:
@@ -325,7 +327,7 @@ def main(cfg: MainConf):
         jafa_args=jafa_args, jafa_cfg=run_cfg.jafa_cfg, output_dir=output_dir, plf=plf
     )
     # run main function of jafa
-    jafa_log_runtime(jafa_args, traindata=tjdatatmp, valdata=vjdatatmp)
+    jafa_log_runtime(run_p, jafa_args, traindata=tjdatatmp, valdata=vjdatatmp)
 
 
 if __name__ == "__main__":
