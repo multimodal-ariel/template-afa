@@ -161,7 +161,10 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
             y = y_valid
             not_i = False  # Allow instance to be its own neighbor in KNN
 
-        num_instances = n_instances if n_instances is not None else len(X)
+        n_instances = (
+            n_instances if n_instances is not None and n_instances <= len(X) else len(X)
+        )
+        num_instances = n_instances
 
         # Initialize lists to store results
         X_rollout = []
