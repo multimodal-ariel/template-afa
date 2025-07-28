@@ -175,7 +175,7 @@ def _jafa_test_runtime(
         "n_acquired_min",
         "n_acquired_max",
         "n_acquired_med",
-        "return",
+        "inference_time_ns" "avg_pred_time_ns" "return",
     ]
     n_features, n_classes = env.n_features, env.n_classes
     if n_classes == 2:
@@ -210,13 +210,15 @@ def _jafa_test_runtime(
         result[prefix + "_picked_{}".format(i)] = np.sum(acquired[:, i])
     result[prefix + "_return"] = np.mean(returns)
     end_time_ns: int = time.time_ns()
-    result["inference_time_ns"] = end_time_ns - start_time_ns
-    result["avg_pred_time_ns"] = (end_time_ns - start_time_ns) / len(valenv.n_data)
+    result[f"{prefix}_inference_time_ns"] = 2 * (end_time_ns - start_time_ns)
+    result[f"{prefix}_avg_pred_time_ns"] = (
+        2 * (end_time_ns - start_time_ns) / valenv.n_data
+    )
     field = sorted_argskey + field
     result.update(argsdict)
     file_exists = os.path.isfile(args.csv_path + ".csv")
     with open(os.path.join(run_p, "metrics.csv"), "a+") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=field)
+        writer = csv.DictWriter(csvfile, result.keys())
         if not file_exists:
             writer.writeheader()
         writer.writerow(result)
@@ -238,7 +240,7 @@ def jafa_log_runtime(
     policy_hidden_sizes = args.policy_hidden_sizes
     shared_dim = args.shared_dim
     nsteps = args.nsteps
-    n_envs = 1
+    n_envs = 2
     r_cost = args.r_cost
 
     # TODO data load first, classifier defining and declare env
@@ -324,7 +326,10 @@ def main(cfg: MainConf):
     plf: pl.Fabric = hd.utils.instantiate(run_cfg.plf, _partial_=True)()
     jafa_args: JAFAMainConf = make_default_jafa_cfg()
     override_jafa_cfg_(
-        jafa_args=jafa_args, jafa_cfg=run_cfg.jafa_cfg, output_dir=output_dir, plf=plf
+        jafa_args=jafa_args,
+        jafa_cfg=run_cfg.jafa_cfg,
+        output_dir=os.path.join(mylib.utils.get_project_root_dir(), run_p),
+        plf=plf,
     )
     # run main function of jafa
     jafa_log_runtime(run_p, jafa_args, traindata=tjdatatmp, valdata=vjdatatmp)
