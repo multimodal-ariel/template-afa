@@ -352,8 +352,8 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
     )
     results: thd.TensorDict | None = None
     start_time_ns: int = time.time_ns()
-    for _i in tqdm.trange(n_instances):
-        _vidx: int = int(th.randint(0, len(vdata), ()).item())
+    for _i in th.randint(0, len(vdata), (n_instances,)):
+        _vidx: int = int(_i)
         _rst = aaco_rollout(
             X_train=tdata["xs"],
             y_train=th.nn.functional.one_hot(tdata["ys"], num_classes=n_labels),
@@ -385,7 +385,7 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
         )
     ).item()
     metrics_d["inference_time_ns"] = end_time_ns - start_time_ns
-    metrics_d["avg_pred_time_ns"] = (end_time_ns - start_time_ns) / len(vdata)
+    metrics_d["avg_pred_time_ns"] = (end_time_ns - start_time_ns) / n_instances
     plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "eval"), step=0)
     return metrics_d
 
