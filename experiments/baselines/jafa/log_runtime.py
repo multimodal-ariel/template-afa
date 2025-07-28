@@ -216,7 +216,7 @@ def _jafa_test_runtime(
     )
     field = sorted_argskey + field
     result.update(argsdict)
-    file_exists = os.path.isfile(args.csv_path + ".csv")
+    file_exists = os.path.isfile(os.path.join(run_p, "metrics.csv"))
     with open(os.path.join(run_p, "metrics.csv"), "a+") as csvfile:
         writer = csv.DictWriter(csvfile, result.keys())
         if not file_exists:
@@ -332,7 +332,7 @@ def main(cfg: MainConf):
         plf=plf,
     )
     # run main function of jafa
-    jafa_log_runtime(run_p, jafa_args, traindata=tjdatatmp, valdata=vjdatatmp)
+    jafa_log_runtime(output_dir, jafa_args, traindata=tjdatatmp, valdata=vjdatatmp)
 
 
 if __name__ == "__main__":
