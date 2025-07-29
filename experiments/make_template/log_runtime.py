@@ -20,6 +20,10 @@ import torchmetrics as thm
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 
+OmegaConf.register_new_resolver(
+    name="get_cls", resolver=lambda cls: hd.utils.get_class(cls)
+)
+
 
 @dataclass
 class MainConf:
@@ -218,7 +222,7 @@ def main(cfg: MainConf):
         accelerator="cpu",
         plugins=plf_plugins_envs.LightningEnvironment(),
     )
-    _start: float = time.time()
+    start_time_ns: int = time.time_ns()
     metrics_d: dict[str, float] = tafalib.utils.evaluate(
         data=vdata[
             th.multinomial(th.ones(len(vdata)), cfg.n_instances, replacement=False)
@@ -240,10 +244,10 @@ def main(cfg: MainConf):
         ),
         plf=plf,
     )
-    _end: float = time.time()
-    time_avg = (_end - _start) / cfg.n_instances
-    nfeats_avg = metrics_d["feature observed"]
-    print(f"time: {time_avg} n_feats: {nfeats_avg}")
+    end_time_ns: int = time.time_ns()
+    metrics_d["inference_time_ns"] = end_time_ns - start_time_ns
+    metrics_d["avg_pred_time_ns"] = (end_time_ns - start_time_ns) / cfg.n_instances
+    plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "eval"), step=0)
     tfb_logger.finalize("success")
     csv_logger.finalize("success")
 
