@@ -1,0 +1,15 @@
+hydra:
+  job:
+    name: big5_runtime
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+# TODO
+# train_exp:
+#   exp_p: str
+#   run_id: int
+# train_run: str
+n_instances: 10
