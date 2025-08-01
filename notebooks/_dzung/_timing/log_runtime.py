@@ -1,10 +1,11 @@
-# %%
 from __future__ import annotations
 
+import logging
 import os
 import time
+import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Optional, Tuple, TypedDict
+from typing import Any, Iterable, Optional
 
 import hydra as hd
 import joblib
@@ -26,7 +27,6 @@ OmegaConf.register_new_resolver(
 )
 
 
-# %%
 @dataclass
 class MainConf:
     train_exp: Optional[MakeTemplateExpConf]
@@ -53,7 +53,6 @@ class TAFAMainConf:
     plf: Any
 
 
-# %%
 @th.no_grad()
 def selector_decision_tree_cost_est(
     inps: th.Tensor,
@@ -95,8 +94,7 @@ def _get_run_dir(cfg: MainConf) -> str:
 
 
 def main(cfg: MainConf):
-    # output_dir: str = HydraConfig.get().runtime.output_dir
-    output_dir: str = "outputs"
+    output_dir: str = HydraConfig.get().runtime.output_dir
     os.makedirs(output_dir, exist_ok=True)
     tafa_run_p: str = _get_run_dir(cfg)
     tafa_cfg: TAFAMainConf = OmegaConf.load(
@@ -196,63 +194,15 @@ def main(cfg: MainConf):
     csv_logger.finalize("success")
 
 
-# %%
-main(
-    MainConf(
-        train_exp=None,
-        train_run="experiments/make_template/outputs/mnist_cnnet/20250326_003820/25",
-        n_instances=1000,
-    )
-)
+if __name__ == "__main__":
 
-# %%
-# if __name__ == "__main__":
+    @hd.main(version_base=None)
+    def _main(cfg: MainConf):
+        logger = logging.getLogger(HydraConfig.get().job.name)
+        try:
+            main(cfg)
+        except Exception as e:
+            logger.error(e, exc_info=True, stack_info=True)
+            traceback.print_exception(e)
 
-#     @hd.main(version_base=None)
-#     def _main(cfg: MainConf):
-#         logger = logging.getLogger(HydraConfig.get().job.name)
-#         try:
-#             main(cfg)
-#         except Exception as e:
-#             logger.error(e, exc_info=True, stack_info=True)
-#             traceback.print_exception(e)
-
-#     _main()
-
-
-# %%
-# """
-# Dzung: things you will have to change (right after this comment):
-
-# - Load your config file here at mktmpl_run_dir
-# - Load the dir path to the saved checkpoint at model_checkpoint_dir
-# - add mktmpl_cfg
-# """
-
-# mktmpl_run_dir: str = "experiments/make_template/outputs/mnist_cnnet/20250326_003820/25"
-# model_checkpoint_dir: str = "models"
-# mktmpl_cfg = OmegaConf.load(
-#     os.path.join(
-#         mylib.utils.get_project_root_dir(), mktmpl_run_dir, ".hydra", "config.yaml"
-#     )
-# )
-
-
-# # %%
-# run_id: str = os.path.split(mktmpl_run_dir)[-1]
-# model_checkpoint_dir = os.path.join(
-#     model_checkpoint_dir, f"{mktmpl_cfg.data.name}_{run_id}"
-# )
-# dt_models = {}
-# for i, file in enumerate(os.listdir(model_checkpoint_dir)):
-#     if file.endswith(".joblib"):
-#         model_path = f"student_{float(i)}.joblib"
-#         model_path = os.path.join(model_checkpoint_dir, model_path)
-#         model = joblib.load(model_path)
-#         dt_models[i] = model
-
-# # %%
-# """
-# USAGE:
-# """
-# selector_decision_tree_cost_est(inps, dt_models)
+    _main()
