@@ -31,7 +31,7 @@ OmegaConf.register_new_resolver(
 class MainConf:
     train_exp: Optional[MakeTemplateExpConf]
     train_run: Optional[str]
-    n_instances: int
+    n_instances: Optional[int]
 
 
 @dataclass
@@ -73,7 +73,7 @@ def selector_decision_tree_cost_est(
     )
     # infer probability of which template is the bset using dtc
     # batch forward for those sharing same cardinalities
-    probs: th.Tensor = th.empty((len(inps), n_tmpls), dtype=th.float32, device=_device)
+    probs: th.Tensor = th.empty((len(inps), n_tmpls), dtype=th.float32, device="cpu")
     for _c in th.unique(cardinalities).tolist():
         _msk: th.Tensor = cardinalities == int(_c)
         # cardinality minus one due to init_feature
@@ -82,7 +82,7 @@ def selector_decision_tree_cost_est(
             dtype=th.float32,
         )
     # from probs to costs
-    costs = -probs
+    costs = (-probs).to(device=_device)
     return costs
 
 
@@ -156,10 +156,14 @@ def main(cfg: MainConf):
                 vclassifier.fit_(tmpls)
     tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
     csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
-    plf = pl.Fabric(
+    # plf = pl.Fabric(
+    #     loggers=[tfb_logger, csv_logger],
+    #     accelerator="cpu",
+    #     plugins=plf_plugins_envs.LightningEnvironment(),
+    # )
+    plf: pl.Fabric = hd.utils.instantiate(tafa_cfg.plf, _partial_=True)(
         loggers=[tfb_logger, csv_logger],
-        accelerator="cpu",
-        plugins=plf_plugins_envs.LightningEnvironment(),
+        plugins=[plf_plugins_envs.LightningEnvironment()],  # type: ignore
     )
     # NOTE load dzung's model
     run_id: str = os.path.split(tafa_run_p)[-1]
@@ -174,9 +178,13 @@ def main(cfg: MainConf):
     # START TIMING
     start_time_ns: int = time.time_ns()
     metrics_d: dict[str, float] = tafalib.utils.evaluate(
-        data=vdata[
-            th.multinomial(th.ones(len(vdata)), cfg.n_instances, replacement=False)
-        ],
+        data=(
+            vdata
+            if cfg.n_instances is None
+            else vdata[
+                th.multinomial(th.ones(len(vdata)), cfg.n_instances, replacement=False)
+            ]
+        ),
         classifier=vclassifier,
         cost_est=lambda x: selector_decision_tree_cost_est(x, dt_models),
         init_fidx=tafa_cfg.init_fidx,
@@ -188,7 +196,9 @@ def main(cfg: MainConf):
     )
     end_time_ns: int = time.time_ns()
     metrics_d["inference_time_ns"] = end_time_ns - start_time_ns
-    metrics_d["avg_pred_time_ns"] = (end_time_ns - start_time_ns) / cfg.n_instances
+    metrics_d["avg_pred_time_ns"] = (end_time_ns - start_time_ns) / (
+        len(vdata) if cfg.n_instances is None else cfg.n_instances
+    )
     plf.log_dict(mylib.utils.add_prefix_to_dict(metrics_d, "eval"), step=0)
     tfb_logger.finalize("success")
     csv_logger.finalize("success")
