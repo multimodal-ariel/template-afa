@@ -20,6 +20,7 @@ lgr = logging.getLogger()
 exp_ps_l: list[str] = [
     "experiments/make_template/outputs/cube_ncands_sweep/20250331_025659",
     "experiments/make_template/outputs/cube_ncands_sweep/20250331_095250",
+    "experiments/make_template/outputs/cube_ncands_sweep_intra-corr/20250713_193214",
 ]
 
 # %%
@@ -28,8 +29,8 @@ os.makedirs(outputs_p, exist_ok=True)
 
 # %%
 method_to_label = {
-    "make_templates_vanilla": "greedy",
-    "make_templates_fix_rounds": "ours",
+    "make_templates_fix_rounds": "mutate",
+    "make_templates_vanilla": "practical",
 }
 method_to_plot_kwargs = {
     "make_templates_fix_rounds": {
@@ -129,12 +130,14 @@ ax: Axes
 fig, ax = plt.subplots(layout="constrained")
 # fig.tight_layout()
 fig.set_figheight(2.3)
-fig.set_figwidth(2.8)
+fig.set_figwidth(2.6)
 for _n, _mdfsl in metrics_df.items():
     _data = pd.concat(
         [_mdf[["eval/n_cands", "eval/acc"]].dropna() for _mdf in _mdfsl]
     ).to_numpy()
     _data = _data[np.argsort(_data[:, 0]).flatten()]
+    if _n not in method_to_plot_kwargs:
+        continue
     ax.plot(
         _data[:, 0], _data[:, 1], label=method_to_label[_n], **method_to_plot_kwargs[_n]
     )
@@ -151,7 +154,7 @@ mkformatter = FuncFormatter(
 )
 ax.xaxis.set_major_formatter(mkformatter)
 ax.set_title("cube")
-ax.set_ylim(0.6, 0.77)
+ax.set_ylim(0.65, 0.765)
 ax.set_ylabel("accuracy")
 ax.set_xlim(0.0, 10_000)
 ax.set_xlabel("candidate set size")
@@ -160,7 +163,7 @@ ax.legend(
     # loc="outside lower center",
     frameon=False,
 )
-fig.savefig(os.path.join(outputs_p, "acc_vs_ncands.png"), dpi=720)
+# fig.savefig(os.path.join(outputs_p, "acc_vs_ncands.png"), dpi=720)
 plt.show()
 
 # %%
