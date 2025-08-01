@@ -190,7 +190,13 @@ def main(cfg: MainConf):
         init_fidx=tafa_cfg.init_fidx,
         tmpls=tmpls,
         metrics_func=thm.MetricCollection(
-            thm.Accuracy(task="multiclass", num_classes=n_labels)
+            {
+                "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+                "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+                "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+                "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+                "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+            }
         ),
         plf=plf,
     )
