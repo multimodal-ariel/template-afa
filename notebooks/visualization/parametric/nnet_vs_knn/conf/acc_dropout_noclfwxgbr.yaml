@@ -1,0 +1,45 @@
+title: null
+mktmpl_fn_name: make_templates_fix_rounds
+key: acc
+expcfgs: [
+    { subtitle: big5, exp_ps: {
+          "dropout-rgr": "experiments/policy/dropout/regressor/outputs/big5_cnnet/20250325_130516",
+          "dropout-xgbr": "experiments/policy/dropout/skl_regressor/outputs/big5_cnnet/20250622_203311",
+          # "dagger-rgr": "experiments/policy/dagger_mixwarmup/regressor/outputs/big5_cnnet/20250414_001356",
+          # "dropout-clf": "experiments/policy/dropout/classifier/outputs/big5_cnnet/20250324_141452",
+          # "dagger-clf": "experiments/policy/dagger_mixwarmup/classifier/outputs/big5_cnnet/20250320_102431",
+        }, xlim: [2, 8], ylim: [0.4, 0.75] },
+    { subtitle: cube, exp_ps: {
+          "dropout-rgr": "experiments/policy/dropout/regressor/outputs/cube/20250408_205338",
+          "dropout-xgbr": "experiments/policy/dropout/skl_regressor/outputs/cube/20250622_204936",
+          # "dropout-clf": "experiments/policy/dropout/classifier/outputs/cube/20250324_140108",
+          # "dagger-rgr": "experiments/policy/dagger_mixwarmup/regressor/outputs/cube/20250412_233329",
+          # "dagger-clf": "experiments/policy/dagger_mixwarmup/classifier/outputs/cube/20250322_213537",
+        }, xlim: [3.75, 7.5], ylim: [.6, null] },
+    { subtitle: gas, exp_ps: {
+          "dropout-rgr": "experiments/policy/dropout/regressor/outputs/gas_cnnet/20250408_182822",
+          "dropout-xgbr": "experiments/policy/dropout/skl_regressor/outputs/gas_cnnet/20250622_210329",
+          # "dropout-clf": "experiments/policy/dropout/classifier/outputs/gas_cnnet/20250324_142826",
+          # "dagger-clf": "experiments/policy/dagger_mixwarmup/classifier/outputs/gas_cnnet/20250324_124152",
+        }, xlim: [1.7, 3], ylim: [0.75, null] },
+    # }, xlim: [2.3, 3.35], ylim: [0.57, null] },
+    { subtitle: grid, exp_ps: {
+          "dropout-rgr": "experiments/policy/dropout/regressor/outputs/grid/20250325_130018",
+          "dropout-xgbr": "experiments/policy/dropout/skl_regressor/outputs/grid/20250623_042326",
+          # "dropout-clf": "experiments/policy/dropout/classifier/outputs/grid/20250324_145143",
+          # "dagger-rgr": "experiments/policy/dagger_mixwarmup/regressor/outputs/grid/20250413_105814",
+          # "dagger-clf": "experiments/policy/dagger_mixwarmup/classifier/outputs/grid/20250323_074525",
+        }, xlim: [2, 7], ylim: [.7, .87] },
+    {
+      subtitle: mnist,
+      exp_ps: {
+          "dropout-rgr": "experiments/policy/dropout/regressor/outputs/mnist_cnnet/20250408_163233",
+          "dropout-xgbr": "experiments/policy/dropout/skl_regressor/outputs/mnist_cnnet/20250622_170546",
+          # "dropout-clf": "experiments/policy/dropout/classifier/outputs/mnist_cnnet/20250324_145339",
+          # "dagger-clf": "experiments/policy/dagger_mixwarmup/classifier/outputs/mnist_cnnet/20250322_143116",
+        },
+      xlim: [6, 20],
+      ylim: [0.6, .97],
+      # ylim: [.7, .97],
+    },
+  ]
