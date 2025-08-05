@@ -53,7 +53,9 @@ keys_to_ylabel = {
 }
 method_to_label = {
     "make_templates_vanilla": "greedy",
-    "make_templates_fix_rounds": "ours",
+    "make_templates_fix_rounds": "tafa",
+    # "tafa-dagger-dtc-make_templates_vanilla": "",
+    "tafa-dagger-dtc-make_templates_fix_rounds": "tafa-interp.",
     # "make_templates_reduce_features": "tafa-reduce-search",
     # "dagger-make_templates_vanilla": "greedy-dagger",
     # "dagger-make_templates_fix_rounds": "mutate-dagger",
@@ -65,12 +67,18 @@ label_to_method = {"aco": "aco", "dime": "dime", "jafa": "jafa", "static": "stat
 label_to_method.update({v: k for k, v in method_to_label.items()})
 method_to_plot_kwargs = {
     "make_templates_fix_rounds": {
+        "color": "red",
+        "alpha": 0.7,
+        "marker": ".",
+    },
+    "tafa-dagger-dtc-make_templates_fix_rounds": {
         "color": "blue",
         "alpha": 0.7,
         "marker": ".",
     },
     "aco": {
-        "color": "red",
+        "color": "cyan",
+        # "color": "cyan",
         "alpha": 0.7,
         "marker": ".",
     },
@@ -94,8 +102,11 @@ method_to_plot_kwargs = {
         "alpha": 0.7,
         "marker": ".",
     },
-    # "dagger-make_templates_vanilla": {"color": "purple"},
-    # "dagger-make_templates_fix_rounds": {"color": "dargreen"},
+    "tafa-dagger-dtc-make_templates_vanilla": {
+        "color": "purple",
+        "alpha": 0.7,
+        "marker": ".",
+    },
     # "dropout-make_templates_vanilla": {"color": "lime"},
     # "dropout-make_templates_fix_rounds": {"color": "cyan"},
 }
@@ -231,6 +242,49 @@ def load_tafa_dagger_metrics(
     return metrics_d
 
 
+def load_tafa_dagger_dtc_metrics(
+    exp_p: str, exclude_mktmplfn_name: Optional[list[str]]
+) -> dict[str, list[pd.DataFrame]]:
+    metrics_d: dict[str, list[pd.DataFrame]] = defaultdict(list)
+    for run_p in sorted(
+        os.listdir(os.path.join(mylib.utils.get_project_root_dir(), exp_p)),
+        key=safe_str_to_int,
+    ):
+        run_p: str = os.path.join(mylib.utils.get_project_root_dir(), exp_p, run_p)
+        metrics_p: str = os.path.join(run_p, "metrics.csv")
+        if not os.path.exists(metrics_p):
+            lgr.warning(f"{metrics_p} does not exist")
+            continue
+        mktmpl_cfg = OmegaConf.load(os.path.join(run_p, ".hydra", "config.yaml"))
+        mktmpl_cfg = OmegaConf.load(
+            os.path.join(
+                mylib.utils.get_project_root_dir(),
+                mktmpl_cfg.train_exp.exp_p,
+                str(mktmpl_cfg.train_exp.run_id),
+                ".hydra",
+                "config.yaml",
+            )
+        )
+        mktmpl_fn_name: str = str.split(mktmpl_cfg.make_templates_fn._target_, ".")[-1]
+        if (
+            exclude_mktmplfn_name is not None
+            and mktmpl_fn_name in exclude_mktmplfn_name
+        ):
+            continue
+        metrics_df: pd.DataFrame = (
+            pd.read_csv(metrics_p).groupby("step").sum(min_count=1)
+        )
+        if (
+            "eval_val/feature observed" not in metrics_df
+            and "eval/feature observed" not in metrics_df
+        ):
+            lgr.warning(f"eval_val/feature observed not in {metrics_p}")
+            continue
+        # print(run_p)
+        metrics_d[mktmpl_fn_name].append(metrics_df)
+    return metrics_d
+
+
 def load_tafa_dropout_metrics(
     exp_p: str, exclude_mktmplfn_name: Optional[list[str]]
 ) -> dict[str, list[pd.DataFrame]]:
@@ -280,6 +334,16 @@ def load_metrics(
                 exp_p, _exclude_mktmplfn_name
             ).items():
                 metrics_d[method_to_label[_name]] = _metrics_l
+        elif name == "tafa-dagger-dtc":
+            _exclude_mktmplfn_name = (
+                load_kwargs["tafa"]["exclude_mktmplfn_name"]
+                if load_kwargs is not None and "tafa" in load_kwargs
+                else None
+            )
+            for _name, _metrics_l in load_tafa_dagger_dtc_metrics(
+                exp_p, _exclude_mktmplfn_name
+            ).items():
+                metrics_d[method_to_label[f"tafa-dagger-dtc-{_name}"]] = _metrics_l
         elif name == "tafa-dropout":
             _exclude_mktmplfn_name = (
                 load_kwargs["tafa-dagger"]["exclude_mktmplfn_name"]
@@ -390,7 +454,58 @@ def load_tafa_runtime(
     return metrics_d
 
 
-# %%
+def load_tafa_dagger_dtc_runtime(
+    exp_p: str, exclude_mktmplfn_name: Optional[list[str]]
+) -> dict[str, pd.DataFrame]:
+    _metrics_d: dict[str, list[pd.DataFrame]] = defaultdict(list)
+    for run_p in sorted(
+        os.listdir(os.path.join(mylib.utils.get_project_root_dir(), exp_p)),
+        key=safe_str_to_int,
+    ):
+        run_p: str = os.path.join(mylib.utils.get_project_root_dir(), exp_p, run_p)
+        metrics_p: str = os.path.join(run_p, "metrics.csv")
+        if not os.path.exists(metrics_p):
+            lgr.warning(f"{metrics_p} does not exist")
+            continue
+        # load the runtime config
+        run_cfg = OmegaConf.load(os.path.join(run_p, ".hydra", "config.yaml"))
+        # fish out original mktmpl config
+        run_cfg = OmegaConf.load(
+            os.path.join(
+                mylib.utils.get_project_root_dir(),
+                run_cfg.train_exp.exp_p,
+                str(run_cfg.train_exp.run_id),
+                ".hydra",
+                "config.yaml",
+            )
+        )
+        mktmpl_fn_name: str = str.split(run_cfg.make_templates_fn._target_, ".")[-1]
+        if (
+            exclude_mktmplfn_name is not None
+            and mktmpl_fn_name in exclude_mktmplfn_name
+        ):
+            continue
+        metrics_df: pd.DataFrame = (
+            pd.read_csv(metrics_p)
+            .groupby("step")
+            .sum(min_count=1)
+            .sort_values("eval/feature observed")
+        )
+        if (
+            "eval_val/feature observed" not in metrics_df
+            and "eval/feature observed" not in metrics_df
+        ):
+            lgr.warning(f"eval_val/feature observed not in {metrics_p}")
+            continue
+        # print(run_p)
+        _metrics_d[mktmpl_fn_name].append(metrics_df)
+    metrics_d: dict[str, pd.DataFrame] = {
+        k: pd.concat(v).sort_values("eval/feature observed")
+        for k, v in _metrics_d.items()
+    }
+    return metrics_d
+
+
 def load_runtimes(
     exp_ps: dict[str, str], load_kwargs: Optional[dict[str, Any]]
 ) -> dict[str, pd.DataFrame]:
@@ -410,6 +525,16 @@ def load_runtimes(
                 exp_p, _exclude_mktmplfn_name
             ).items():
                 metrics_d[method_to_label[_name]] = _metrics_l
+        elif name == "tafa-dagger-dtc":
+            _exclude_mktmplfn_name = (
+                load_kwargs["tafa"]["exclude_mktmplfn_name"]
+                if load_kwargs is not None and "tafa" in load_kwargs
+                else None
+            )
+            for _name, _metrics_l in load_tafa_runtime(
+                exp_p, _exclude_mktmplfn_name
+            ).items():
+                metrics_d[method_to_label[f"tafa-dagger-dtc-{_name}"]] = _metrics_l
         # elif name == "tafa-dropout":
         #     _exclude_mktmplfn_name = (
         #         load_kwargs["tafa-dagger"]["exclude_mktmplfn_name"]
@@ -451,7 +576,7 @@ def make_plots(
                             "make_templates_vanilla",
                         ]
                     },
-                    "tafa-dagger": {
+                    "tafa-dagger-dtc": {
                         "exclude_mktmplfn_name": [
                             "make_templates_reduce_features",
                             "make_templates_fix_rounds_nearest_neighbors",
@@ -474,7 +599,7 @@ def make_plots(
                             "make_templates_vanilla",
                         ]
                     },
-                    "tafa-dagger": {
+                    "tafa-dagger-dtc": {
                         "exclude_mktmplfn_name": [
                             "make_templates_reduce_features",
                             "make_templates_fix_rounds_nearest_neighbors",
@@ -497,9 +622,9 @@ def make_plots(
     label_set = list()
     line_set = list()
     for _expcfg, _ax, _metrics_d in zip(pltcfg.expcfgs, axs[0], metrics_dl):
-        _ax.set_title(_expcfg.subtitle)
+        _ax.set_title(_expcfg.subtitle, fontsize="xx-large")
         _ax.set_box_aspect(1.0)
-        for _name, _metrics_dfl in _metrics_d.items():
+        for _name, _metrics_dfl in reversed(_metrics_d.items()):
             if len(_metrics_dfl) == 0:
                 continue
             _prefix: str
@@ -548,7 +673,7 @@ def make_plots(
     for _expcfg, _ax, _runtimes_d in zip(pltcfg.expcfgs, axs[1], runtimes_dl):
         # _ax.set_title(_expcfg.subtitle)
         _ax.set_box_aspect(1.0)
-        for _name, _runtimes_df in _runtimes_d.items():
+        for _name, _runtimes_df in reversed(_runtimes_d.items()):
             if len(_runtimes_df) == 0:
                 continue
             _ax.plot(
@@ -584,20 +709,21 @@ runtimes_dl = None
 fig, axs, line_set, label_set, metrics_dl, runtimes_dl = make_plots(
     pltcfg=pltcfg, metrics_dl=metrics_dl, runtimes_dl=runtimes_dl
 )
-fig.set_figheight(1.7 * 2.0 + 0.667 * max(len(label_set) // 4 - 1, 0))
+fig.set_figheight(1.75 * 2.0 + 0.667 * max(len(label_set) // 4 - 1, 0))
 fig.set_figwidth(1.7 * len(axs[0]))
 if pltcfg.title is not None:
     fig.suptitle(pltcfg.title)
-fig.supxlabel("number of features acquired\n")
+fig.supxlabel("number of features acquired\n", fontsize="x-large")
 # fig.supylabel(keys_to_ylabel[pltcfg.key])
-axs[0][0].set_ylabel(keys_to_ylabel[pltcfg.key])
-axs[1][0].set_ylabel("log eval time [s]")
+axs[0][0].set_ylabel(keys_to_ylabel[pltcfg.key], fontsize="large")
+axs[1][0].set_ylabel("log eval time [s]", fontsize="large")
 fig.legend(
-    line_set,
-    label_set,
+    list(reversed(line_set)),
+    list(reversed(label_set)),
     loc="outside lower center",
     frameon=False,
     ncol=6,
+    fontsize="large",
     # borderaxespad=1.0,
     # borderaxespad=0.18,
 )

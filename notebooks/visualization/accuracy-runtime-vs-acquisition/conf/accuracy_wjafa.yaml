@@ -1,12 +1,12 @@
 title: null
 key: acc
-expcfgs:
-  [
+expcfgs: [
     {
       subtitle: big5,
       exp_ps:
         {
           "tafa": "experiments/make_template/outputs/big5_cnnet/20250318_144121",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/big5_runtime/20250801_030529",
           "aco": "experiments/baselines/aco/outputs/big5/20250313_153149",
           "dime": "experiments/baselines/dime/outputs/big5_eval/20250319_144337",
           "jafa": "experiments/baselines/jafa/outputs/big5/20250330_184611",
@@ -15,18 +15,20 @@ expcfgs:
       runtime_ps:
         {
           "tafa": "experiments/make_template/outputs/big5_runtime/20250729_024917",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/big5_runtime/20250801_030529",
           "aco": "experiments/baselines/aco/outputs/big5_runtime/20250728_112338",
           "dime": "experiments/baselines/dime/outputs/big5_runtime/20250724_212719",
           "jafa": "experiments/baselines/jafa/outputs/big5_runtime/20250727_214652",
         },
       xlim: [0.0, 13],
-      ylim_row0: [0.37, 0.76],
+      ylim_row0: [0.37, 0.8],
     },
     {
       subtitle: cube,
       exp_ps:
         {
           "tafa": "experiments/make_template/outputs/cube/20250318_225416",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/cube_runtime/20250801_030719",
           "aco": "experiments/baselines/aco/outputs/cube/20250311_201540",
           "dime": "experiments/baselines/dime/outputs/cube_eval/20250323_223212",
           "jafa": "experiments/baselines/jafa/outputs/cube/20250330_211151",
@@ -35,6 +37,7 @@ expcfgs:
       runtime_ps:
         {
           "tafa": "experiments/make_template/outputs/cube_runtime/20250729_025023",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/cube_runtime/20250801_030719",
           "aco": "experiments/baselines/aco/outputs/cube_runtime/20250728_121935",
           "dime": "experiments/baselines/dime/outputs/cube_runtime/20250724_213239",
           "jafa": "experiments/baselines/jafa/outputs/gas_runtime/20250727_215706",
@@ -47,6 +50,7 @@ expcfgs:
       exp_ps:
         {
           "tafa": "experiments/make_template/outputs/gas_cnnet/20250324_224734",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/gas_runtime/20250801_030802",
           "aco": "experiments/baselines/aco/outputs/gas/20250312_143952",
           "dime": "experiments/baselines/dime/outputs/gas_eval/20250319_150025",
           "jafa": "experiments/baselines/jafa/outputs/gas/20250327_125619",
@@ -55,12 +59,13 @@ expcfgs:
       runtime_ps:
         {
           "tafa": "experiments/make_template/outputs/gas_runtime/20250729_025043",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/gas_runtime/20250801_030802",
           "aco": "experiments/baselines/aco/outputs/gas_runtime/20250728_122105",
           "dime": "experiments/baselines/dime/outputs/gas_runtime/20250724_213524",
           "jafa": "experiments/baselines/jafa/outputs/gas_runtime/20250727_215706",
         },
       # xlim: [1.5, 3.3],
-      xlim: [1.2, 5.9],
+      xlim: [1.2, 5.1],
       ylim_row0: [0.57, null],
     },
     {
@@ -68,6 +73,7 @@ expcfgs:
       exp_ps:
         {
           "tafa": "experiments/make_template/outputs/grid_cnnet/20250325_213622",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/grid_runtime/20250801_032538",
           "aco": "experiments/baselines/aco/outputs/grid/20250311_221119",
           "dime": "experiments/baselines/dime/outputs/grid_eval/20250323_220729",
           "jafa": "experiments/baselines/jafa/outputs/grid/20250330_231839",
@@ -76,6 +82,7 @@ expcfgs:
       runtime_ps:
         {
           "tafa": "experiments/make_template/outputs/grid_runtime/20250729_025159",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/grid_runtime/20250801_032538",
           "aco": "experiments/baselines/aco/outputs/grid_runtime/20250728_131237",
           "dime": "experiments/baselines/dime/outputs/grid_runtime/20250724_214213",
           "jafa": "experiments/baselines/jafa/outputs/grid_runtime/20250727_215755",
@@ -88,6 +95,7 @@ expcfgs:
       exp_ps:
         {
           "tafa": "experiments/make_template/outputs/mnist_cnnet/20250326_003820",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/mnist_runtime/20250801_032740",
           "aco": "experiments/baselines/aco/outputs/mnist/20250326_163939",
           "dime": "experiments/baselines/dime/outputs/mnist_eval/20250323_170930",
           "jafa": "experiments/baselines/jafa/outputs/mnist/20250408_123011",
@@ -96,6 +104,7 @@ expcfgs:
       runtime_ps:
         {
           "tafa": "experiments/make_template/outputs/mnist_runtime/20250729_025215",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/mnist_runtime/20250801_032740",
           "aco": "experiments/baselines/aco/outputs/mnist_runtime/20250728_134214",
           "dime": "experiments/baselines/dime/outputs/mnist_runtime/20250724_214258",
           "jafa": "experiments/baselines/jafa/outputs/mnist_runtime/20250728_012625",
