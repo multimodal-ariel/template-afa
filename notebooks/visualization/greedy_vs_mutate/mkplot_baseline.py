@@ -50,7 +50,7 @@ keys_to_ylabel = {
     "f1-score": "f1-score",
 }
 method_to_label = {
-    "make_templates_vanilla": "greedy",
+    "make_templates_vanilla": "practical",
     "make_templates_fix_rounds": "mutate",
     # "make_templates_reduce_features": "tafa-reduce-search",
     # "dagger-make_templates_vanilla": "greedy-dagger",
@@ -329,7 +329,7 @@ def make_plots(
     label_set = list()
     line_set = list()
     for _expcfg, _ax, _metrics_d in zip(pltcfg.expcfgs, axs[0], metrics_dl):
-        _ax.set_title(_expcfg.subtitle)
+        _ax.set_title(_expcfg.subtitle, fontsize="xx-large")
         _ax.set_box_aspect(1.0)
         for _name, _metrics_dfl in _metrics_d.items():
             _prefix: str
@@ -388,19 +388,20 @@ metrics_dl = None
 fig, axs, line_set, label_set, metrics_dl = make_plots(
     pltcfg=pltcfg, metrics_dl=metrics_dl
 )
-fig.set_figheight(2.0 + 0.667 * max(len(label_set) // 4 - 1, 0))
+fig.set_figheight(2.3 + 0.667 * max(len(label_set) // 4 - 1, 0))
 fig.set_figwidth(1.7 * len(axs[0]))
 if pltcfg.title is not None:
     fig.suptitle(pltcfg.title)
-fig.supxlabel("number of feature acquisition\n")
+fig.supxlabel("number of feature acquisition\n", fontsize="x-large")
 # fig.supylabel(keys_to_ylabel[pltcfg.key])
-axs[0][0].set_ylabel(keys_to_ylabel[pltcfg.key])
+axs[0][0].set_ylabel(keys_to_ylabel[pltcfg.key], fontsize="x-large")
 fig.legend(
     line_set,
     label_set,
     loc="outside lower center",
     frameon=False,
     ncol=6,
+    fontsize="large",
     # borderaxespad=1.0,
     # borderaxespad=0.18,
 )

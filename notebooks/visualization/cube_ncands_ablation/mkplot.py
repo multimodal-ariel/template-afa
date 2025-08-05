@@ -34,12 +34,12 @@ method_to_label = {
 }
 method_to_plot_kwargs = {
     "make_templates_fix_rounds": {
-        "color": "blue",
+        "color": "red",
         # "alpha": 0.7,
         # "marker": "|",
     },
     "make_templates_vanilla": {
-        "color": "red",
+        "color": "blue",
         # "alpha": 0.7,
         # "marker": "|",
     },
@@ -158,12 +158,15 @@ ax.set_ylim(0.65, 0.765)
 ax.set_ylabel("accuracy")
 ax.set_xlim(0.0, 10_000)
 ax.set_xlabel("candidate set size")
+_ax_lines, _ax_labels = ax.get_legend_handles_labels()
 ax.legend(
+    list(reversed(_ax_lines)),
+    list(reversed(_ax_labels)),
     # ncols=2,
     # loc="outside lower center",
     frameon=False,
 )
-# fig.savefig(os.path.join(outputs_p, "acc_vs_ncands.png"), dpi=720)
+fig.savefig(os.path.join(outputs_p, "acc_vs_ncands.png"), dpi=720)
 plt.show()
 
 # %%
