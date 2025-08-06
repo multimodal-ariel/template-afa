@@ -64,9 +64,10 @@ data_y_train = tys[:, None, :].expand(-1, Rall, -1).flatten(0, 1).argmax(dim=1).
 # data_y_train = tys.repeat(1000, 1).argmax(dim=1).detach().numpy()
 
 # %%
-model_xgb_arb = xgbst.XGBClassifier(
-    n_estimators=200, max_depth=20, random_state=29, n_jobs=None
-)
+# model_xgb_arb = xgbst.XGBClassifier(
+#     n_estimators=200, max_depth=20, random_state=29, n_jobs=None
+# )
+model_xgb_arb = xgbst.XGBClassifier(random_state=29)
 model_xgb_arb.fit(data_x_train, data_y_train)
 
 # %%
