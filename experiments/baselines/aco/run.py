@@ -80,6 +80,16 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
             )
         )
         return aacolib.classifier.classifier_xgb(xgb_model)
+    elif dataset_name == "charfont-1500":
+        xgb_model = xgbst.XGBClassifier()
+        xgb_model.load_model(
+            os.path.join(
+                os.path.dirname(aacolib.__file__),
+                "_saved_models",
+                "charfont1500_xgb_classifier_arb_subsets.json",
+            )
+        )
+        return aacolib.classifier.classifier_xgb(xgb_model)
     else:
         raise ValueError("Unsupported dataset or model")
 
@@ -112,7 +122,7 @@ def get_knn(
 
 # Helper function to load the mask generator based on the dataset
 def load_mask_generator(dataset_name, input_dim):
-    if dataset_name in ["cube_20_0.3", "mnist", "big5_C_cls", "volvo"]:
+    if dataset_name in ["cube_20_0.3", "mnist", "big5_C_cls", "volvo", "charfont-1500"]:
         return aacolib.mask_generator.random_mask_generator(10000, input_dim, 1000)
     elif dataset_name == "grid_data" or dataset_name == "gas":
         all_masks = aacolib.mask_generator.generate_all_masks(
