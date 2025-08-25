@@ -22,6 +22,7 @@ import torch as th
 import torchmetrics as thm
 import tqdm.auto as tqdm
 import xgboost as xgbst
+import sklearn.preprocessing as skl_preproc
 from omegaconf import OmegaConf
 
 OmegaConf.register_new_resolver(
@@ -68,7 +69,16 @@ def _rfe_mutate_tmpls(
     for _tidx in th.unique(tmpl_idxs).tolist():
         _idxs: th.Tensor = tmpl_idxs == _tidx
         _txs: th.Tensor = txs[_idxs, :]
-        _tys: th.Tensor = tys[_idxs]
+        # encode label to consecutive integers starting with zero
+        _tys: th.Tensor = th.as_tensor(
+            skl_preproc.LabelEncoder().fit_transform(tys[_idxs].numpy(force=True)),
+            dtype=th.long,
+        )
+        # in case only one category in _tys
+        if th.unique(tys).numel() == 1:
+            _tys = th.zeros_like(_tys)
+            _tys = th.cat((_tys, th.tensor([1], dtype=th.long)), dim=0)
+            _txs = th.cat((_txs, _txs[-1, :][None, :]), dim=0)
         # TODO allow multiple estimators_ for an ensemble of feature selection
         _newfms: th.Tensor = th.stack(
             [
