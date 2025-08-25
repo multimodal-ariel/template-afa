@@ -75,7 +75,7 @@ def _rfe_mutate_tmpls(
             dtype=th.long,
         )
         # in case only one category in _tys
-        if th.unique(tys).numel() == 1:
+        if th.unique(_tys).numel() == 1:
             _tys = th.zeros_like(_tys)
             _tys = th.cat((_tys, th.tensor([1], dtype=th.long)), dim=0)
             _txs = th.cat((_txs, _txs[-1, :][None, :]), dim=0)
