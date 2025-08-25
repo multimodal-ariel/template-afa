@@ -97,8 +97,12 @@ def _rfe_mutate_tmpls(
                     .support_,
                     dtype=th.long,
                 )
-                for _n_features_to_select in range(
-                    min_features, int(th.sum(tmpls_prv[_tidx]).item()) + 1
+                for _n_features_to_select in tqdm.trange(
+                    min_features,
+                    int(th.sum(tmpls_prv[_tidx]).item()) + 1,
+                    desc="rfe-loop",
+                    leave=False,
+                    dynamic_ncols=True,
                 )
             ],
             dim=0,
