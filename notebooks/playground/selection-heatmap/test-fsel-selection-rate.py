@@ -69,16 +69,22 @@ def _rfe_mutate_tmpls(
     for _tidx in th.unique(tmpl_idxs).tolist():
         _idxs: th.Tensor = tmpl_idxs == _tidx
         _txs: th.Tensor = txs[_idxs, :]
-        # encode label to consecutive integers starting with zero
-        _tys: th.Tensor = th.as_tensor(
-            skl_preproc.LabelEncoder().fit_transform(tys[_idxs].numpy(force=True)),
-            dtype=th.long,
-        )
+        _tys: th.Tensor = tys[_idxs]
         # in case only one category in _tys
         if th.unique(_tys).numel() == 1:
-            _tys = th.zeros_like(_tys)
-            _tys = th.cat((_tys, th.tensor([1], dtype=th.long)), dim=0)
-            _txs = th.cat((_txs, _txs[-1, :][None, :]), dim=0)
+            # just sample a random subset of data to perform feature selection
+            _rsamp_idxs: th.Tensor = th.multinomial(
+                th.ones(len(tdata)),
+                num_samples=int(th.max(th.bincount(tmpl_idxs)).item()),
+                replacement=True,
+            )
+            _txs: th.Tensor = txs[_rsamp_idxs, :]
+            _tys: th.Tensor = tys[_rsamp_idxs]
+        # encode label to consecutive integers starting with zero
+        _tys = th.as_tensor(
+            skl_preproc.LabelEncoder().fit_transform(_tys.numpy(force=True)),
+            dtype=th.long,
+        )
         # TODO allow multiple estimators_ for an ensemble of feature selection
         _newfms: th.Tensor = th.stack(
             [
