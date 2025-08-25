@@ -65,7 +65,12 @@ def _rfe_mutate_tmpls(
     # (n, )
     tys: th.Tensor = tdata["ys"]
     newfms_l: list[th.Tensor] = list()
-    for _tidx in th.unique(tmpl_idxs).tolist():
+    for _tidx in tqdm.tqdm(
+        th.unique(tmpl_idxs).tolist(),
+        desc="rfe-loop",
+        leave=False,
+        dynamic_ncols=True,
+    ):
         _idxs: th.Tensor = tmpl_idxs == _tidx
         _txs: th.Tensor = txs[_idxs, :]
         _tys: th.Tensor = tys[_idxs]
@@ -97,12 +102,8 @@ def _rfe_mutate_tmpls(
                     .support_,
                     dtype=th.long,
                 )
-                for _n_features_to_select in tqdm.trange(
-                    min_features,
-                    int(th.sum(tmpls_prv[_tidx]).item()) + 1,
-                    desc="rfe-loop",
-                    leave=False,
-                    dynamic_ncols=True,
+                for _n_features_to_select in range(
+                    min_features, int(th.sum(tmpls_prv[_tidx]).item()) + 1
                 )
             ],
             dim=0,
