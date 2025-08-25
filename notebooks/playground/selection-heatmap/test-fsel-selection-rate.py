@@ -44,7 +44,6 @@ class TemplateInfo(TypedDict):
 def _rfe_mutate_tmpls(
     tdata: thd.TensorDict,
     tpcomp: thd.TensorDict,
-    slctd_ms: th.Tensor,
     tmpls_prv: th.Tensor,
     init_fidx: int,
     n_cands_targ: int,
@@ -58,7 +57,7 @@ def _rfe_mutate_tmpls(
     # TODO allow multiple estimators_ for an ensemble of feature selection
     # assert "estimator_" not in rfecv_kwargs
     # (n, ntmpls)
-    rwds: th.Tensor = tpcomp["rwds"][:, slctd_ms]
+    rwds: th.Tensor = tpcomp["rwds"]
     # (n, )
     tmpl_idxs: th.Tensor = th.argmin(rwds, dim=1)
     # (n, n_covs)
@@ -253,7 +252,6 @@ def _update_template_candidates_rfe_with_tracking(
     new_fcs_set = _rfe_mutate_tmpls(
         tdata=tdata,
         tpcomp=tpcomp,
-        slctd_ms=slctd_ms,
         tmpls_prv=tmpls_prv,
         init_fidx=init_fidx,
         n_cands_targ=n_cands_mutate,
