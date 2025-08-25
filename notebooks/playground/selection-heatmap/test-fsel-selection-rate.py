@@ -453,7 +453,14 @@ def make_templates_rfe_with_tracking(
             ctmpls, template_sources, source_stats = (
                 _update_template_candidates_rfe_with_tracking(
                     tdata=tdata,
-                    tpcomp=tpcomp,
+                    tpcomp=tafalib.utils.precomp_rwds_for_tmpls(
+                        tmpls=tmpls,
+                        data=tdata,
+                        classifier=classifier,
+                        lmbda=lmbda,
+                        bsz=bsz,
+                        plf=plf,
+                    ),
                     ctmpls=ctmpls,
                     slctd_ms=slctd_ms,
                     prev_template_sources=template_sources,
