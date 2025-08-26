@@ -118,7 +118,7 @@ def _rfe_mutate_tmpls(
             )
         ]
     fcs_set: set[tuple[int, ...]] = {
-        tuple(sorted(th.argwhere(_nfm == 1).tolist())) for _nfm in newfms
+        tuple(sorted(th.argwhere(_nfm == 1).flatten().tolist())) for _nfm in newfms
     }
     fcs_set = {_fc for _fc in fcs_set if _fc not in fcs_prv}
     return fcs_set
