@@ -534,34 +534,42 @@ def make_templates_rfe_with_tracking(
             classifier.fit_(tmpls)
         # log metrics to track progress
         if _i % eval_every_n_iter == 0:
-            _tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
-                tmpls=tmpls,
-                data=tdata,
-                classifier=tclassifier,
-                lmbda=lmbda,
-                bsz=bsz,
-                plf=plf,
-            )
-            tmetrics_d: dict[str, float] = tafalib.utils.evaluate(
-                data=tdata,
-                classifier=vclassifier,
-                cost_est=lambda x: tafalib.functional.knn_cost_est(
-                    x,
-                    lmbda=lmbda,
-                    txs=tdata["xs"],
-                    tcels=_tpcomp["cels"],
-                    tmpls=tmpls,  # type:ignore
-                    n_neighs=n_neighs,
-                    p=2,
-                    is_train=True,
-                ),
-                init_fidx=init_fidx,
-                tmpls=tmpls,
-                metrics_func=metrics_func,
-                plf=plf,
-            )
-            plf.log_dict(mylib.utils.add_prefix_to_dict(tmetrics_d, "train"), step=_i)
+            # _tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+            #     tmpls=tmpls,
+            #     data=tdata,
+            #     classifier=tclassifier,
+            #     lmbda=lmbda,
+            #     bsz=bsz,
+            #     plf=plf,
+            # )
+            # tmetrics_d: dict[str, float] = tafalib.utils.evaluate(
+            #     data=tdata,
+            #     classifier=vclassifier,
+            #     cost_est=lambda x: tafalib.functional.knn_cost_est(
+            #         x,
+            #         lmbda=lmbda,
+            #         txs=tdata["xs"],
+            #         tcels=_tpcomp["cels"],
+            #         tmpls=tmpls,  # type:ignore
+            #         n_neighs=n_neighs,
+            #         p=2,
+            #         is_train=True,
+            #     ),
+            #     init_fidx=init_fidx,
+            #     tmpls=tmpls,
+            #     metrics_func=metrics_func,
+            #     plf=plf,
+            # )
+            # plf.log_dict(mylib.utils.add_prefix_to_dict(tmetrics_d, "train"), step=_i)
             if vdata is not None:
+                _tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+                    tmpls=tmpls,
+                    data=tdata,
+                    classifier=tclassifier,
+                    lmbda=lmbda,
+                    bsz=bsz,
+                    plf=plf,
+                )
                 vmetrics_d: dict[str, float] = tafalib.utils.evaluate(
                     data=vdata,
                     classifier=vclassifier,
