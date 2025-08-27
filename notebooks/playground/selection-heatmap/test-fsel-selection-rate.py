@@ -322,6 +322,10 @@ def make_templates_rfe_with_tracking(
     lmbda: float,
     bsz: int,
     plf: pl.Fabric,
+    n_neighs: int,
+    vdata: Optional[thd.TensorDict],
+    metrics_func: thm.MetricCollection,
+    eval_every_n_iter: int,
 ) -> th.Tensor:
     """Generate feature subset templates using RFE-based evolutionary search with source tracking.
 
@@ -528,6 +532,54 @@ def make_templates_rfe_with_tracking(
             and to_update_classifier
         ):
             classifier.fit_(tmpls)
+        # log metrics to track progress
+        if _i % eval_every_n_iter == 0:
+            _tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+                tmpls=tmpls,
+                data=tdata,
+                classifier=tclassifier,
+                lmbda=lmbda,
+                bsz=bsz,
+                plf=plf,
+            )
+            tmetrics_d: dict[str, float] = tafalib.utils.evaluate(
+                data=tdata,
+                classifier=vclassifier,
+                cost_est=lambda x: tafalib.functional.knn_cost_est(
+                    x,
+                    lmbda=lmbda,
+                    txs=tdata["xs"],
+                    tcels=_tpcomp["cels"],
+                    tmpls=tmpls,  # type:ignore
+                    n_neighs=n_neighs,
+                    p=2,
+                    is_train=True,
+                ),
+                init_fidx=init_fidx,
+                tmpls=tmpls,
+                metrics_func=metrics_func,
+                plf=plf,
+            )
+            plf.log_dict(mylib.utils.add_prefix_to_dict(tmetrics_d, "train"), step=_i)
+            if vdata is not None:
+                vmetrics_d: dict[str, float] = tafalib.utils.evaluate(
+                    data=vdata,
+                    classifier=vclassifier,
+                    cost_est=lambda x: tafalib.functional.knn_cost_est(
+                        x,
+                        lmbda=lmbda,
+                        txs=tdata["xs"],
+                        tcels=_tpcomp["cels"],
+                        tmpls=tmpls,  # type:ignore
+                        n_neighs=n_neighs,
+                        p=2,
+                    ),
+                    init_fidx=init_fidx,
+                    tmpls=tmpls,
+                    metrics_func=metrics_func,
+                    plf=plf,
+                )
+                plf.log_dict(mylib.utils.add_prefix_to_dict(vmetrics_d, "val"), step=_i)
     assert tmpls is not None
     return tmpls
 
@@ -580,6 +632,15 @@ csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version
 
 # %%
 plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
+metrics_func = thm.MetricCollection(
+    {
+        "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+        "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+        "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+        "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+        "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+    }
+)
 
 # %%
 if init_fidx is None:
@@ -616,22 +677,15 @@ tmpls = make_templates_rfe_with_tracking(
     lmbda=lmbda,
     bsz=bsz,
     plf=plf,
+    n_neighs=n_neighs,
+    vdata=vdata,
+    metrics_func=metrics_func,
+    eval_every_n_iter=1,
 )
 
 # %%
 tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
     tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz, plf=plf
-)
-
-# %%
-metrics_func = thm.MetricCollection(
-    {
-        "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
-        "precision": thm.Precision(task="multiclass", num_classes=n_labels),
-        "recall": thm.Recall(task="multiclass", num_classes=n_labels),
-        "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
-        "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
-    }
 )
 
 # %%
