@@ -435,7 +435,7 @@ def make_templates_fix_rounds_with_tracking(
 
 
 # %%
-# NOTE big5
+# NOTE mnist
 data_name: str = "mnist"
 _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=True)
 n_covs: int = _tdata["xs"].shape[1]
