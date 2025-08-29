@@ -346,6 +346,9 @@ def make_templates_fix_rounds_with_tracking(
     for _i in tqdm.trange(
         n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
     ):
+        _generator: th.Generator = (
+            th.Generator().manual_seed(279) if _i == 0 else th.default_generator
+        )
         if ctmpls is None or tmpls is None or slctd_ms is None:
             # initialize candidate pool
             ctmpls = tafalib.makers.candidates.make_template_candidates(
@@ -355,7 +358,7 @@ def make_templates_fix_rounds_with_tracking(
                 min_features=min_features,
                 max_features=max_features,
                 # NOTE: fix initial candidates
-                generator=th.Generator().manual_seed(279),
+                generator=_generator,
             )
             # Tag all initial templates as random, generation 0
             template_sources = []
@@ -394,7 +397,13 @@ def make_templates_fix_rounds_with_tracking(
         tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
             ctmpls,
             data=(
-                tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+                tdata[
+                    th.multinomial(
+                        th.ones((len(tdata),)),
+                        num_samples=max_tdata,
+                        generator=_generator,
+                    )
+                ]
                 if max_tdata is not None and max_tdata < len(tdata)
                 else tdata
             ),
