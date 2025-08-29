@@ -354,6 +354,8 @@ def make_templates_fix_rounds_with_tracking(
                 n_cands_targ=n_cands_init,
                 min_features=min_features,
                 max_features=max_features,
+                # NOTE: fix initial candidates
+                generator=th.Generator().manual_seed(279),
             )
             # Tag all initial templates as random, generation 0
             template_sources = []
