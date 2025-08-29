@@ -78,6 +78,7 @@ def make_templates_vanilla(
     lmbda: float,
     bsz: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
     """make templates greedily
 
@@ -98,6 +99,7 @@ def make_templates_vanilla(
     Returns:
         th.Tensor: (n_tmpls, n_covs)
     """
+    generator = th.default_generator if generator is None else generator
     classifier.to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
@@ -108,6 +110,7 @@ def make_templates_vanilla(
         n_cands_targ=n_cands,
         min_features=min_features,
         max_features=max_features,
+        generator=generator,
     )
     if (
         isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
@@ -117,7 +120,11 @@ def make_templates_vanilla(
     tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
         tmpls=ctmpls,
         data=(
-            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)), num_samples=max_tdata, generator=generator
+                )
+            ]
             if max_tdata is not None and max_tdata < len(tdata)
             else tdata
         ),
@@ -152,10 +159,13 @@ def make_greedy_correlation_templates(
     n_cands: int,
     min_features: int,
     max_features: Optional[int],
-    make_candidates_fn: Callable[[th.Tensor, int, int, int, int], th.Tensor],
+    make_candidates_fn: Callable[
+        [th.Tensor, int, int, int, int], th.Tensor
+    ],  # TODO: might need to be changed
     lmbda: float,
     bsz: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
     """
     Generates correlation-based templates using a classifier and candidate template generator.
@@ -182,10 +192,12 @@ def make_greedy_correlation_templates(
     Returns:
         th.Tensor: Selected templates as a tensor.
     """
+    generator = th.default_generator if generator is None else generator
     classifier.to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
     # NOTE init. candidate templates
+    # TODO might need to change
     ctmpls: th.Tensor = make_candidates_fn(
         xs=tdata["xs"],
         init_fidx=init_fidx,
@@ -201,7 +213,11 @@ def make_greedy_correlation_templates(
     tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
         tmpls=ctmpls,
         data=(
-            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)), num_samples=max_tdata, generator=generator
+                )
+            ]
             if max_tdata is not None and max_tdata < len(tdata)
             else tdata
         ),
@@ -242,7 +258,9 @@ def make_templates_reduce_features(
     lmbda: float,
     bsz: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     classifier.to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features_targ = n_covs if max_features_targ is None else max_features_targ
@@ -270,6 +288,7 @@ def make_templates_reduce_features(
                 n_cands_targ=n_cands_targ,
                 min_features=_minfeats,
                 max_features=_maxfeats,
+                generator=generator,
             )
         else:
             # update candidate pool from existing templates
@@ -282,6 +301,7 @@ def make_templates_reduce_features(
                 min_features=_minfeats,
                 max_features=_maxfeats,
                 use_feature_importance_sampling=use_feature_importance_sampling,
+                generator=generator,
             )
         if (
             isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
@@ -291,7 +311,13 @@ def make_templates_reduce_features(
         tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
             ctmpls,
             data=(
-                tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+                tdata[
+                    th.multinomial(
+                        th.ones((len(tdata),)),
+                        num_samples=max_tdata,
+                        generator=generator,
+                    )
+                ]
                 if max_tdata is not None and max_tdata < len(tdata)
                 else tdata
             ),
@@ -335,6 +361,7 @@ def make_templates_fix_rounds(
     lmbda: float,
     bsz: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
     """make templates using mutate greedy search
 
@@ -359,6 +386,7 @@ def make_templates_fix_rounds(
     Returns:
         th.Tensor: (n_tmpls, n_covs)
     """
+    generator = th.default_generator if generator is None else generator
     classifier.eval().to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
@@ -376,6 +404,7 @@ def make_templates_fix_rounds(
                 n_cands_targ=n_cands_init,
                 min_features=min_features,
                 max_features=max_features,
+                generator=generator,
             )
         else:
             # update candidate pool from existing templates
@@ -389,6 +418,7 @@ def make_templates_fix_rounds(
                 min_features=min_features,
                 max_features=max_features,
                 use_feature_importance_sampling=use_feature_importance_sampling,
+                generator=generator,
             )
         if (
             isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
@@ -398,7 +428,13 @@ def make_templates_fix_rounds(
         tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
             ctmpls,
             data=(
-                tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+                tdata[
+                    th.multinomial(
+                        th.ones((len(tdata),)),
+                        num_samples=max_tdata,
+                        generator=generator,
+                    )
+                ]
                 if max_tdata is not None and max_tdata < len(tdata)
                 else tdata
             ),
@@ -439,6 +475,7 @@ def make_templates_fix_rounds_minibatch(
     bsz: int,
     minibatch_size: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
     classifier.eval().to(device=plf.device)
     n_covs: int = classifier.n_covs
@@ -460,6 +497,7 @@ def make_templates_fix_rounds_minibatch(
                         n_cands_targ=max(n_cands_targ, n_cands_targ_minibatch),
                         min_features=min_features,
                         max_features=max_features,
+                        generator=generator,
                     )
                 )
             ctmpls = th.cat(
@@ -467,7 +505,9 @@ def make_templates_fix_rounds_minibatch(
                     make_templates_vanilla(
                         tdata=tdata[
                             th.multinomial(
-                                th.ones((len(tdata),)), num_samples=minibatch_size
+                                th.ones((len(tdata),)),
+                                num_samples=minibatch_size,
+                                generator=generator,
                             )
                         ],
                         max_tdata=None,
@@ -481,6 +521,7 @@ def make_templates_fix_rounds_minibatch(
                         lmbda=lmbda,
                         bsz=bsz,
                         plf=plf,
+                        generator=generator,
                     )
                     for _ in range(math.ceil(n_cands_targ / n_tmpls_targ))
                 ],
@@ -500,6 +541,7 @@ def make_templates_fix_rounds_minibatch(
                     min_features=min_features,
                     max_features=max_features,
                     use_feature_importance_sampling=use_feature_importance_sampling,
+                    generator=generator,
                 )
                 for _ in range(math.ceil(n_cands_targ / n_tmpls_targ))
             ]
@@ -514,7 +556,9 @@ def make_templates_fix_rounds_minibatch(
                             tmpls=_ctmpls,
                             data=tdata[
                                 th.multinomial(
-                                    th.ones((len(tdata),)), num_samples=minibatch_size
+                                    th.ones((len(tdata),)),
+                                    num_samples=minibatch_size,
+                                    generator=generator,
                                 )
                             ],
                             classifier=classifier,
@@ -538,7 +582,13 @@ def make_templates_fix_rounds_minibatch(
         tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
             ctmpls,
             data=(
-                tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+                tdata[
+                    th.multinomial(
+                        th.ones((len(tdata),)),
+                        num_samples=max_tdata,
+                        generator=generator,
+                    )
+                ]
                 if max_tdata is not None and max_tdata < len(tdata)
                 else tdata
             ),
@@ -577,7 +627,9 @@ def make_templates_fix_rounds_nearest_neighbors(
     n_neighs: int,
     bsz: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     classifier.eval().to(device=plf.device)
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
@@ -595,6 +647,7 @@ def make_templates_fix_rounds_nearest_neighbors(
                 n_cands_targ=n_cands_init,
                 min_features=min_features,
                 max_features=max_features,
+                generator=generator,
             )
         else:
             # update candidate pool from existing templates
@@ -608,6 +661,7 @@ def make_templates_fix_rounds_nearest_neighbors(
                 min_features=min_features,
                 max_features=max_features,
                 use_feature_importance_sampling=use_feature_importance_sampling,
+                generator=generator,
             )
         if (
             isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
@@ -615,7 +669,11 @@ def make_templates_fix_rounds_nearest_neighbors(
         ):
             classifier.fit_(ctmpls)
         _tdata = (
-            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)), num_samples=max_tdata, generator=generator
+                )
+            ]
             if max_tdata is not None and max_tdata < len(tdata)
             else tdata
         )
@@ -676,6 +734,7 @@ def make_vanilla_gradient_descent_templates(
     n_gradient_mutate_iters: int,
     n_gradient_steps_per_mutate_iter: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ):
     """
     Generates a set of high-quality template feature selectors using gradient descent.
@@ -711,6 +770,7 @@ def make_vanilla_gradient_descent_templates(
     def _uniform_like(inputs: th.Tensor, low: float, high: float):
         return th.distributions.Uniform(low, high).sample(inputs.shape)
 
+    generator = th.default_generator if generator is None else generator
     classifier.eval().to(device=plf.device)
     n_data: int = len(tdata)
     n_covs: int = tdata["xs"].shape[1]
@@ -723,7 +783,10 @@ def make_vanilla_gradient_descent_templates(
         # draw a "tiny" batch of training instances
         _bidxs: th.Tensor = (
             th.multinomial(
-                th.ones(n_data), num_samples=n_tdata_minibatch, replacement=False
+                th.ones(n_data),
+                num_samples=n_tdata_minibatch,
+                replacement=False,
+                generator=generator,
             )
             if n_tdata_minibatch < n_data
             else th.arange(n_data)
@@ -740,6 +803,7 @@ def make_vanilla_gradient_descent_templates(
             n_cands_targ=n_cands_minibatch,
             min_features=min_features,
             max_features=max_features,
+            generator=generator,
         )
         _bctmpls = th.where(
             _bctmpls == 1,
@@ -833,6 +897,7 @@ def make_vanilla_gradient_descent_templates(
         min_features=min_features,
         max_features=max_features,
         prv_featcounts=None,
+        generator=generator,
     )
     # from fcomb to act
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
@@ -844,7 +909,11 @@ def make_vanilla_gradient_descent_templates(
     tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
         tmpls=ctmpls,
         data=(
-            tdata[th.multinomial(th.ones((len(tdata),)), num_samples=max_tdata)]
+            tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)), num_samples=max_tdata, generator=generator
+                )
+            ]
             if max_tdata is not None and max_tdata < len(tdata)
             else tdata
         ),
@@ -1023,7 +1092,9 @@ def _ident_init_fidx_single(
     lmbda: float,
     bsz: int,
     plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
 ) -> tuple[int, th.Tensor]:
+    generator = th.default_generator if generator is None else generator
     n_covs: int = tdata["xs"].shape[1]
     classifier.eval().to(device=plf.device)
     if isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier):
@@ -1033,10 +1104,15 @@ def _ident_init_fidx_single(
                 n_masks=len(tdata),
                 min_features=1,
                 max_features=max_features,
+                generator=generator,
             )
         )
     fms: th.Tensor = tafalib_makers_candidates.make_feature_masks(
-        n_covs=n_covs, n_masks=n_masks, min_features=1, max_features=max_features
+        n_covs=n_covs,
+        n_masks=n_masks,
+        min_features=1,
+        max_features=max_features,
+        generator=generator,
     )
     best_mask_cost: th.Tensor = th.inf * th.ones((n_covs,))
     n_masks = min(n_masks, len(fms))
@@ -1046,7 +1122,7 @@ def _ident_init_fidx_single(
         # (n_covs, )
         _bfm: th.Tensor = fms[_i]
         # (bsz, )
-        _btidxs: th.Tensor = th.randint(0, len(tdata), (bsz,))
+        _btidxs: th.Tensor = th.randint(0, len(tdata), (bsz,), generator=generator)
         # (bsz, n_covs)
         _btdata: thd.TensorDict = tdata[_btidxs]
         _bfms: th.Tensor = _bfm[None, :].expand(bsz, -1)
@@ -1073,6 +1149,7 @@ def _update_template_candidates(
     min_features: int,
     max_features: Optional[int],
     use_feature_importance_sampling: bool,
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
     """update template candidates
 
@@ -1088,11 +1165,13 @@ def _update_template_candidates(
     Returns:
         th.Tensor: (n_cands, n_covs) a new collection of candidates.
     """
+    generator = th.default_generator if generator is None else generator
     fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
         tmpls_prv=ctmpls[slctd_ms],
         init_fidx=init_fidx,
         n_cands_targ=n_cands_targ,
         min_features=min_features,
+        generator=generator,
     )
     n_covs: int = ctmpls.shape[1]
     fcs_sets_by_bins: list[set[tuple[int, ...]]] = _fill_fcs_set_with_random_tmpls(
@@ -1105,6 +1184,7 @@ def _update_template_candidates(
         prv_featcounts=(
             th.sum(ctmpls[slctd_ms], dim=0) if use_feature_importance_sampling else None
         ),
+        generator=generator,
     )
     # from fcomb to act
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
@@ -1125,7 +1205,9 @@ def _update_template_candidates_fix_rounds(
     min_features: int,
     max_features: Optional[int],
     use_feature_importance_sampling: bool,
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     tmpls_prv: th.Tensor = ctmpls[slctd_ms]
     n_cands_mutate = len(tmpls_prv) if n_cands_mutate is None else n_cands_mutate
     fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
@@ -1133,6 +1215,7 @@ def _update_template_candidates_fix_rounds(
         init_fidx=init_fidx,
         n_cands_targ=min(n_cands_mutate + len(tmpls_prv), n_cands_init),
         min_features=min_features,
+        generator=generator,
     )
     n_covs: int = ctmpls.shape[1]
     n_cands_targ = (
@@ -1148,6 +1231,7 @@ def _update_template_candidates_fix_rounds(
         prv_featcounts=(
             th.sum(ctmpls[slctd_ms], dim=0) if use_feature_importance_sampling else None
         ),
+        generator=generator,
     )
     # from fcomb to act
     fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
@@ -1163,7 +1247,9 @@ def _mutate_tmpls(
     init_fidx: int,
     n_cands_targ: int,
     min_features: int,
+    generator: Optional[th.Generator],
 ) -> set[tuple[int, ...]]:
+    generator = th.default_generator if generator is None else generator
     # new candidate pool set
     fcs_set: set[tuple[int, ...]] = {
         tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls_prv
@@ -1180,7 +1266,9 @@ def _mutate_tmpls(
         if _c >= n_cands_targ or len(fcs_set) >= n_cands_targ:
             break
         # randomly choose an existing template to mutate from
-        _tmpl_prv: th.Tensor = tmpls_prv[int(th.randint(0, len(tmpls_prv), ()).item())]
+        _tmpl_prv: th.Tensor = tmpls_prv[
+            int(th.randint(0, len(tmpls_prv), (), generator=generator).item())
+        ]
         # make copy of selected template
         _tmpl: th.Tensor = _tmpl_prv.clone()
         # always remove one feature from currently chosen templates
@@ -1191,7 +1279,13 @@ def _mutate_tmpls(
         _fidxs = _fidxs[_fidxs != init_fidx]
         # set mutated feature to be zero
         _tmpl[
-            _fidxs[th.multinomial(th.ones_like(_fidxs, dtype=th.float64), _nfeats_mut)]
+            _fidxs[
+                th.multinomial(
+                    th.ones_like(_fidxs, dtype=th.float64),
+                    _nfeats_mut,
+                    generator=generator,
+                )
+            ]
         ] = 0
         # add _tmpl to candidate pool
         _fc: tuple[int, ...] = tuple(th.argwhere(_tmpl == 1).flatten().tolist())
@@ -1210,7 +1304,9 @@ def _fill_fcs_set_with_random_tmpls(
     min_features: int,
     max_features: Optional[int],
     prv_featcounts: Optional[th.Tensor],
+    generator: Optional[th.Generator],
 ) -> list[set[tuple[int, ...]]]:
+    generator = th.default_generator if generator is None else generator
     # fill the rest of the demanded with randomly generated ones
     # group fcs_set by len(fcomb)
     max_features = n_covs if max_features is None else max_features
@@ -1242,7 +1338,9 @@ def _fill_fcs_set_with_random_tmpls(
     # sample number of fcs to add to existing feature combinations
     ps: th.Tensor = th.ones_like(bincnt_fcs, dtype=th.float32)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
-        th.multinomial(ps, n_cands_targ - len(fcs_set), replacement=True),
+        th.multinomial(
+            ps, n_cands_targ - len(fcs_set), replacement=True, generator=generator
+        ),
         minlength=len(bincnt_fcs),
     )
     # in case number of actions in any of the bin exceeds maximum number of actions
@@ -1257,6 +1355,7 @@ def _fill_fcs_set_with_random_tmpls(
                 _tmp_ps,
                 int(th.sum(_realloc_cnts).item()),
                 replacement=True,
+                generator=generator,
             ),
             minlength=len(bincnt_fcs),
         )
@@ -1276,7 +1375,9 @@ def _fill_fcs_set_with_random_tmpls(
             )
             _ps = th.where(_ps == 0, th.min(_ps[_ps > 0]), _ps)
             _ps = _ps.to(dtype=th.float32)
-            _fc_l: list[int] = th.multinomial(_ps, num_samples=_nfeats).tolist()
+            _fc_l: list[int] = th.multinomial(
+                _ps, num_samples=_nfeats, generator=generator
+            ).tolist()
             # make sure initial feature is in fcomb
             if init_fidx not in _fc_l:
                 _fc_l.append(init_fidx)

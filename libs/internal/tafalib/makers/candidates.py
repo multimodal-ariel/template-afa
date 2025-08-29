@@ -13,6 +13,7 @@ def make_feature_masks(
     n_masks: int,
     min_features: int,
     max_features: Optional[int],
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
     """make random subset feature masks
 
@@ -36,7 +37,8 @@ def make_feature_masks(
     bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l, dtype=th.long)
     ps: th.Tensor = th.ones_like(bincnt_fcs, dtype=th.float32)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
-        th.multinomial(ps, n_masks, replacement=True), minlength=len(bincnt_fcs)
+        th.multinomial(ps, n_masks, replacement=True, generator=generator),
+        minlength=len(bincnt_fcs),
     )
     # in case number of actions in any of the bin exceeds maximum number of actions
     _curr_bincnts: th.Tensor = nfc_from_each_binned_fcs
@@ -50,6 +52,7 @@ def make_feature_masks(
                 _tmp_ps,
                 int(th.sum(_realloc_cnts).item()),
                 replacement=True,
+                generator=generator,
             ),
             minlength=len(bincnt_fcs),
         )
@@ -65,7 +68,7 @@ def make_feature_masks(
         _nfeats: int = _k + min_features
         while len(_fcs_set) < _count:
             _fc_l: list[int] = th.multinomial(
-                th.ones((n_covs,)), num_samples=_nfeats
+                th.ones((n_covs,)), num_samples=_nfeats, generator=generator
             ).tolist()
             _fc_l.sort()
             # ensure _ctmpl_fcs are all unique entries
@@ -87,6 +90,7 @@ def make_template_candidates(
     n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
     """make random candidate set of subset feature masks
 
@@ -100,6 +104,7 @@ def make_template_candidates(
     Returns:
         th.Tensor: (n_cands_actual, n_covs) feature masks
     """
+    generator = th.default_generator if generator is None else generator
     bincnt_fcs_l: list[int] = [
         # in order to accomondate for init_fidx,
         # both n_covs and i is one less than desired n_feats
@@ -112,7 +117,8 @@ def make_template_candidates(
     bincnt_fcs: th.Tensor = th.as_tensor(bincnt_fcs_l, dtype=th.long)
     ps: th.Tensor = th.ones_like(bincnt_fcs, dtype=th.float32)
     nfc_from_each_binned_fcs: th.Tensor = th.bincount(
-        th.multinomial(ps, n_cands, replacement=True), minlength=len(bincnt_fcs)
+        th.multinomial(ps, n_cands, replacement=True, generator=generator),
+        minlength=len(bincnt_fcs),
     )
     # in case number of actions in any of the bin exceeds maximum number of actions
     _curr_bincnts: th.Tensor = nfc_from_each_binned_fcs
@@ -126,6 +132,7 @@ def make_template_candidates(
                 _tmp_ps,
                 int(th.sum(_realloc_cnts).item()),
                 replacement=True,
+                generator=generator,
             ),
             minlength=len(bincnt_fcs),
         )
@@ -141,7 +148,7 @@ def make_template_candidates(
         _nfeats: int = _k + min_features
         while len(_fcs_set) < _count:
             _fc_l: list[int] = th.multinomial(
-                th.ones((n_covs,)), num_samples=_nfeats
+                th.ones((n_covs,)), num_samples=_nfeats, generator=generator
             ).tolist()
             # make sure initial feature is in fcomb
             if init_fidx not in _fc_l:
@@ -169,7 +176,9 @@ def make_inter_correlation_template_candidates(
     min_features: int,
     max_features: Optional[int],
     corr_thrsh: float,
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     n_covs: int = xs.shape[1]
     # from fcomb to act
     ctmpls: th.Tensor = _make_inter_corr_candidates(
@@ -179,6 +188,7 @@ def make_inter_correlation_template_candidates(
         min_features=min_features,
         max_features=max_features,
         corr_thrsh=corr_thrsh,
+        generator=generator,
     )
     ctmpls = th.unique(ctmpls, dim=0)
     if len(ctmpls) < n_cands_targ:
@@ -192,6 +202,7 @@ def make_inter_correlation_template_candidates(
                         n_cands_targ=n_cands_targ - len(ctmpls),
                         min_features=min_features,
                         max_features=max_features,
+                        generator=generator,
                     ),
                 ),
                 dim=0,
@@ -209,7 +220,9 @@ def make_intra_correlation_template_candidates(
     min_features: int,
     max_features: Optional[int],
     corr_thrsh: float,
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     n_covs: int = xs.shape[1]
     # from fcomb to act
     ctmpls: th.Tensor = _make_intra_corr_candidates(
@@ -219,6 +232,7 @@ def make_intra_correlation_template_candidates(
         min_features=min_features,
         max_features=max_features,
         corr_thrsh=corr_thrsh,
+        generator=generator,
     )
     ctmpls = th.unique(ctmpls, dim=0)
     if len(ctmpls) < n_cands_targ:
@@ -232,6 +246,7 @@ def make_intra_correlation_template_candidates(
                         n_cands_targ=n_cands_targ - len(ctmpls),
                         min_features=min_features,
                         max_features=max_features,
+                        generator=generator,
                     ),
                 ),
                 dim=0,
@@ -250,7 +265,9 @@ def make_inter_intra_correlation_template_candidates(
     max_features: Optional[int],
     inter_corr_thrsh: float,
     intra_corr_thrsh: float,
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     n_covs: int = xs.shape[1]
     # from fcomb to act
     ctmpls: th.Tensor = th.cat(
@@ -262,6 +279,7 @@ def make_inter_intra_correlation_template_candidates(
                 min_features=min_features,
                 max_features=max_features,
                 corr_thrsh=inter_corr_thrsh,
+                generator=generator,
             ),
             _make_intra_corr_candidates(
                 xs=xs,
@@ -270,6 +288,7 @@ def make_inter_intra_correlation_template_candidates(
                 min_features=min_features,
                 max_features=max_features,
                 corr_thrsh=intra_corr_thrsh,
+                generator=generator,
             ),
         )
     )
@@ -285,6 +304,7 @@ def make_inter_intra_correlation_template_candidates(
                         n_cands_targ=n_cands_targ - len(ctmpls),
                         min_features=min_features,
                         max_features=max_features,
+                        generator=generator,
                     ),
                 ),
                 dim=0,
@@ -303,7 +323,9 @@ def _make_inter_corr_candidates(
     min_features: int,
     max_features: Optional[int],
     corr_thrsh: float,
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     n_covs: int = xs.shape[1]
     # compute feature correlation
     # (n_covs, n_covs)
@@ -328,20 +350,28 @@ def _make_inter_corr_candidates(
         # choose some groups to draw features from
         _gids: th.Tensor = th.multinomial(
             th.ones((n_groups,)),
-            num_samples=int(th.randint(0, n_groups, ()).item()) + 1,
+            num_samples=int(th.randint(0, n_groups, (), generator=generator).item())
+            + 1,
             replacement=False,
+            generator=generator,
         )
-        _gids = _gids[th.randperm(len(_gids))]
+        _gids = _gids[th.randperm(len(_gids), generator=generator)]
         _fc_l: list[int] = list()
         for _gid in _gids:
             _idxs: th.Tensor = th.multinomial(
                 th.ones((len(gfidxs[_gid]))),
-                num_samples=int(th.randint(0, len(gfidxs[_gid]), ()).item()) + 1,
+                num_samples=int(
+                    th.randint(0, len(gfidxs[_gid]), (), generator=generator).item()
+                )
+                + 1,
                 replacement=False,
+                generator=generator,
             )
             _fc_l.extend(th.as_tensor(gfidxs[_gid])[_idxs].tolist())
         # ensure max features
-        _fc_l = th.as_tensor(_fc_l)[th.randperm(len(_fc_l))].tolist()
+        _fc_l = th.as_tensor(_fc_l)[
+            th.randperm(len(_fc_l), generator=generator)
+        ].tolist()
         if max_features is not None and max_features - 1 < len(_fc_l):
             _fc_l = _fc_l[:max_features]
         _fc_l.append(init_fidx)
@@ -368,7 +398,9 @@ def _make_intra_corr_candidates(
     min_features: int,
     max_features: Optional[int],
     corr_thrsh: float,
+    generator: Optional[th.Generator],
 ) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
     n_covs: int = xs.shape[1]
     # compute feature correlation
     # (n_covs, n_covs)
@@ -393,22 +425,30 @@ def _make_intra_corr_candidates(
         # choose some groups to draw features from
         _gids: th.Tensor = th.multinomial(
             th.ones((n_groups,)),
-            num_samples=int(th.randint(0, n_groups, ()).item()) + 1,
+            num_samples=int(th.randint(0, n_groups, (), generator=generator).item())
+            + 1,
             replacement=False,
+            generator=generator,
         )
-        _gids = _gids[th.randperm(len(_gids))]
+        _gids = _gids[th.randperm(len(_gids), generator=generator)]
         _fc_l: list[int] = list()
         for _gid in _gids:
             _idxs: th.Tensor = th.multinomial(
                 th.ones((len(gfidxs[_gid]))),
-                num_samples=int(th.randint(0, len(gfidxs[_gid]), ()).item()) + 1,
+                num_samples=int(
+                    th.randint(0, len(gfidxs[_gid]), (), generator=generator).item()
+                )
+                + 1,
                 replacement=False,
+                generator=generator,
             )
             _fc_l.extend(th.as_tensor(gfidxs[_gid])[_idxs].tolist())
             if len(gfidxs[_gid]) > 3:
                 break
         # ensure max features
-        _fc_l = th.as_tensor(_fc_l)[th.randperm(len(_fc_l))].tolist()
+        _fc_l = th.as_tensor(_fc_l)[
+            th.randperm(len(_fc_l), generator=generator)
+        ].tolist()
         if max_features is not None and max_features - 1 < len(_fc_l):
             _fc_l = _fc_l[:max_features]
         _fc_l.append(init_fidx)
