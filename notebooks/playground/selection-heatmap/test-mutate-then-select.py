@@ -709,12 +709,12 @@ def _fine_tune_templates_with_rfe(
                 lmbda=lmbda,
                 txs=tdata["xs"],
                 tcels=final_tpcomp["cels"],
-                tmpls=tmpls,  # type:ignore
+                tmpls=final_tmpls,  # type:ignore
                 n_neighs=n_neighs,
                 p=2,
             ),
             init_fidx=init_fidx,
-            tmpls=tmpls,
+            tmpls=final_tmpls,
             metrics_func=metrics_func,
             plf=plf,
         )
