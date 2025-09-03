@@ -497,6 +497,7 @@ def make_templates_fix_rounds_with_tracking(
                     ),
                     init_fidx=init_fidx,
                     tmpls=tmpls,
+                    lmbda=lmbda,
                     metrics_func=metrics_func,
                     plf=plf,
                 )

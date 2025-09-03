@@ -146,6 +146,7 @@ def main(cfg: MainConf):
         ),
         init_fidx=tafa_cfg.init_fidx,
         tmpls=tmpls,
+        lmbda=tafa_cfg.lmbda,
         metrics_func=thm.MetricCollection(
             thm.Accuracy(task="multiclass", num_classes=n_labels)
         ),

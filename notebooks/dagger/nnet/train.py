@@ -409,6 +409,7 @@ def dagger_fit_nnet_regressor(
                 ),
                 init_fidx=init_fidx,
                 tmpls=tmpls,
+                lmbda=lmbda,
                 metrics_func=metrics_func,
                 plf=plf,
             )
@@ -490,6 +491,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     ),
     init_fidx=cfg.init_fidx,
     tmpls=tmpls,
+    lmbda=cfg.lmbda,
     metrics_func=metrics_func,
     plf=plf_tmpl,
 )
@@ -505,6 +507,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     ),
     init_fidx=cfg.init_fidx,
     tmpls=tmpls,
+    lmbda=cfg.lmbda,
     metrics_func=metrics_func,
     plf=plf_tmpl,
 )
@@ -538,6 +541,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     ),
     init_fidx=cfg.init_fidx,
     tmpls=tmpls,
+    lmbda=cfg.lmbda,
     metrics_func=metrics_func,
     plf=plf_tmpl,
 )

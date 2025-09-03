@@ -236,9 +236,7 @@ if mktmpl_cfg.vclassifier is not None:
     )
 
 # %%
-stdata: thd.TensorDict = compile_selector_dataset(
-    tdata=tdata, tpcomp=tpcomp
-)
+stdata: thd.TensorDict = compile_selector_dataset(tdata=tdata, tpcomp=tpcomp)
 
 # %%
 # configure logger and ckpt path
@@ -278,6 +276,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     ),
     init_fidx=mktmpl_cfg.init_fidx,
     tmpls=tmpls,
+    lmbda=mktmpl_cfg.lmbda,
     metrics_func=metrics_func,
     plf=plf,
 )
@@ -332,6 +331,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     ),
     init_fidx=mktmpl_cfg.init_fidx,
     tmpls=tmpls,
+    lmbda=mktmpl_cfg.lmbda,
     metrics_func=metrics_func,
     plf=plf,
 )
@@ -347,6 +347,7 @@ metrics_d: dict[str, float] = tafalib.utils.evaluate(
     ),
     init_fidx=mktmpl_cfg.init_fidx,
     tmpls=tmpls,
+    lmbda=mktmpl_cfg.lmbda,
     metrics_func=metrics_func,
     plf=plf,
 )

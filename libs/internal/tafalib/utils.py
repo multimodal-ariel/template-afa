@@ -246,6 +246,7 @@ def evaluate(
     cost_est: Callable[[th.Tensor], th.Tensor],
     init_fidx: int,
     tmpls: th.Tensor,
+    lmbda: float,
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
 ) -> dict[str, float]:
@@ -257,6 +258,7 @@ def evaluate(
         cost_est (Callable[[th.Tensor], th.Tensor]): cost estimator
         init_fidx (int): initial feature index
         tmpls (th.Tensor): (n_tmpls, n_covs) collection of templates
+        lmbda (float): penalty for acquiring more features
         metrics_func (thm.MetricCollection): a collection of metrics of interests
         plf (pl.Fabric): plf instance for prediction
 
@@ -265,8 +267,10 @@ def evaluate(
     """
     snfobsd_l: list[int] = list()
     snfcomb_l: list[int] = list()
+    pyhats_l: list[th.Tensor] = list()
+    fms: th.Tensor = th.zeros((len(data), data["xs"].shape[1]), dtype=th.long)
     metrics_func.reset()
-    for _data in data:
+    for _i, _data in enumerate(data):
         _pyhat, _fobsd_l, _fcomb = run_one_episode_all_obsd(
             x=_data["xs"],
             classifier=classifier,
@@ -277,9 +281,16 @@ def evaluate(
         )
         snfobsd_l.append(len(_fobsd_l))
         snfcomb_l.append(len(_fcomb))
+        pyhats_l.append(_pyhat[None, :].to(device="cpu"))
+        fms[_i, _fcomb] = 1
         metrics_func.update(
             _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
         )
+    pyhats: th.Tensor = th.cat(pyhats_l, dim=0)
+    cels: th.Tensor = th.nn.functional.cross_entropy(
+        pyhats, data["ys"], reduction="none"
+    )
+    rwds: th.Tensor = -cels - lmbda * th.sum(fms, dim=1)
     metrics_d: dict[str, float] = {
         k: v.item() for k, v in metrics_func.compute().items()
     }
@@ -287,6 +298,7 @@ def evaluate(
     metrics_d.update(
         {
             "init_fidx": init_fidx,
+            "reward": th.mean(rwds, dim=0).item(),
             "feature observed": th.mean(
                 th.as_tensor(snfobsd_l, dtype=th.float32)
             ).item(),

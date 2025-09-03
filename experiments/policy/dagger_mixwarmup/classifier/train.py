@@ -420,6 +420,7 @@ def dagger_fit_nnet_selector(
                 ),
                 init_fidx=init_fidx,
                 tmpls=tmpls,
+                lmbda=lmbda,
                 metrics_func=metrics_func,
                 plf=plf,
             )
@@ -564,6 +565,7 @@ def main(cfg: MainConf):
         ),
         init_fidx=mktmpl_cfg.init_fidx,
         tmpls=tmpls,
+        lmbda=mktmpl_cfg.lmbda,
         metrics_func=metrics_func,
         plf=plf,
     )
@@ -602,6 +604,7 @@ def main(cfg: MainConf):
         ),
         init_fidx=mktmpl_cfg.init_fidx,
         tmpls=tmpls,
+        lmbda=mktmpl_cfg.lmbda,
         metrics_func=metrics_func,
         plf=plf,
     )

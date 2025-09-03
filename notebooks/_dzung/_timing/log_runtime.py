@@ -189,6 +189,7 @@ def main(cfg: MainConf):
         cost_est=lambda x: selector_decision_tree_cost_est(x, dt_models),
         init_fidx=tafa_cfg.init_fidx,
         tmpls=tmpls,
+        lmbda=tafa_cfg.lmbda,
         metrics_func=thm.MetricCollection(
             {
                 "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),

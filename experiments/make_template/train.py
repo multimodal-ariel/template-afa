@@ -126,6 +126,7 @@ def main(cfg: MainConf):
         ),
         init_fidx=cfg.init_fidx,
         tmpls=tmpls,
+        lmbda=cfg.lmbda,
         metrics_func=metrics_func,
         plf=plf,
     )
