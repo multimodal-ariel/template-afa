@@ -192,24 +192,26 @@ n_labels: int = len(th.unique(_tdata["ys"]))
 _tdata_shuffle_idxs = th.randperm(len(_tdata))
 tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
 extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
-run_p: str = (
+nnet_run_p: str = (
     "experiments/pretrain/nnet_subset_feature_classifier/outputs/big5/20250312_224514"
 )
-run_cfg = OmegaConf.load(
-    os.path.join(mylib.utils.get_project_root_dir(), run_p, ".hydra", "config.yaml")
+nnet_run_cfg = OmegaConf.load(
+    os.path.join(
+        mylib.utils.get_project_root_dir(), nnet_run_p, ".hydra", "config.yaml"
+    )
 )
 tclassifier = (
     mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
         nnet=hd.utils.instantiate(
-            run_cfg.nnet,
+            nnet_run_cfg.nnet,
             in_features=n_covs * 2,
             out_features=n_labels,
         ),
         xs_train=tdata["xs"].numpy(),
         ys_train=tdata["ys"].numpy(),
-        fit_kwargs=hd.utils.instantiate(run_cfg.nnet_fit_cfg),
+        fit_kwargs=hd.utils.instantiate(nnet_run_cfg.nnet_fit_cfg),
         state_dict_p=os.path.join(
-            mylib.utils.get_project_root_dir(), run_p, "classifier.pt"
+            mylib.utils.get_project_root_dir(), nnet_run_p, "classifier.pt"
         ),
     )
 )
