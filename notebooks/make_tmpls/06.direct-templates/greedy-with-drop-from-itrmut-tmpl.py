@@ -92,11 +92,10 @@ def make_templates_direct_greedy_with_drop(
                 tuple(_t.tolist()) for _i, _t in enumerate(_tmpls_prv) if _i != _tidx
             }
             # given tidx-th template, for each possible location, toggle avaialability of one feature to tidx-th template
-            _zeropos: list[int] = th.argwhere(_tmpls_prv[_tidx] == 0).flatten().tolist()
-            for _pos in _zeropos:
+            for _pos in [_i for _i in range(n_covs) if _i != init_fidx]:
                 _cinds: set[tuple[int, ...]] = copy.deepcopy(_base_inds)
                 _new_ind: th.Tensor = _tmpls_prv[_tidx].clone()
-                _new_ind[_pos] = 1 if _new_ind == 0 else 0
+                _new_ind[_pos] = 1 if _new_ind[_pos] == 0 else 0
                 if th.sum(_new_ind) > max_features:
                     continue
                 _cinds.add(tuple(_new_ind.tolist()))
@@ -291,7 +290,9 @@ metrics_func = thm.MetricCollection(
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "greedy-with-drop-from-itrmut-tmpl")
+output_dir: str = os.path.join(
+    "outputs", "run", data_name, "greedy-with-drop-from-itrmut-tmpl"
+)
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
