@@ -291,7 +291,7 @@ metrics_func = thm.MetricCollection(
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "greedy-from-itrmut-tmpl")
+output_dir: str = os.path.join("outputs", "run", data_name, "greedy-with-drop-from-itrmut-tmpl")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
