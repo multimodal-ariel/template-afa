@@ -31,6 +31,7 @@ OmegaConf.register_new_resolver(
 def make_templates_direct_greedy(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    tmpls_pt: Optional[th.Tensor],
     init_fidx: int,
     n_tmpls: int,
     max_features: Optional[int],
@@ -53,10 +54,14 @@ def make_templates_direct_greedy(
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
     # initialize templates
-    tmpls: th.Tensor = th.zeros((n_tmpls, n_covs), dtype=th.long)
+    tmpls: th.Tensor = (
+        th.zeros((n_tmpls, n_covs), dtype=th.long) if tmpls_pt is None else tmpls_pt
+    )
     tmpls[:, init_fidx] = 1
+    if tmpls_pt is not None:
+        assert n_tmpls == len(tmpls)
     # book keeping
-    _nxt_blk_idx: int = 0
+    _nxt_blk_idx: int = 0 if tmpls_pt is None else n_tmpls - 1
     # direct greedy optimize
     pbar = tqdm.trange(n_iter, desc="direct-greedy", leave=False, dynamic_ncols=True)
     for _itr in pbar:
@@ -308,6 +313,7 @@ if init_fidx is None:
 tmpls: th.Tensor = make_templates_direct_greedy(
     tdata=tdata,
     classifier=tclassifier,
+    tmpls_pt=None,
     init_fidx=init_fidx,
     n_tmpls=n_tmpls,
     max_features=max_features,
