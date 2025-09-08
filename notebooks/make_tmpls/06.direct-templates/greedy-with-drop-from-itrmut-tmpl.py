@@ -28,7 +28,7 @@ OmegaConf.register_new_resolver(
 
 # %%
 @th.no_grad()
-def make_templates_direct_greedy_with_drop(
+def make_templates_direct_greedy_with_undo(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     tmpls_pt: Optional[th.Tensor],
@@ -323,7 +323,7 @@ if init_fidx is None:
     )
 
 # %%
-tmpls: th.Tensor = make_templates_direct_greedy_with_drop(
+tmpls: th.Tensor = make_templates_direct_greedy_with_undo(
     tdata=tdata,
     classifier=tclassifier,
     tmpls_pt=tmpls_pt,
