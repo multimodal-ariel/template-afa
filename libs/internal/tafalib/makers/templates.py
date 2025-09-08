@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools as itrtls
 import math
+import os
 from typing import Callable, Iterable, Optional
 
 import lightning as pl
@@ -11,8 +12,10 @@ import scipy.spatial as sp_spatial
 import tensordict as thd
 import torch as th
 import torch.distributions.utils
+import torchmetrics as thm
 import tqdm.auto as tqdm
 
+from .. import functional as tafalib_functional
 from .. import utils as tafalib_utils
 from . import candidates as tafalib_makers_candidates
 
@@ -1080,6 +1083,258 @@ def make_templates_from_candidates_nearest_neighbors(
     pbar.close()
     tmpls: th.Tensor = ctmpls[slctd_ms]
     return tmpls, slctd_ms
+
+
+@th.no_grad()
+def make_templates_direct_greedy_with_undo(
+    tdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    tmpls_pt: Optional[th.Tensor],
+    init_fidx: int,
+    n_tmpls: int,
+    max_features: Optional[int],
+    lmbda: float,
+    n_iter: int,
+    bsz: int,
+    plf: pl.Fabric,
+    n_neighs: int,
+    vdata: Optional[thd.TensorDict],
+    vclassifier: Optional[mymodels.classifiers.SubsetFeatureClassifier],
+    metrics_func: thm.MetricCollection,
+    eval_every_n_iter: int,
+    ckpt_p: Optional[str] = None,
+    generator: Optional[th.Generator] = None,
+) -> th.Tensor:
+    """
+    Direct greedy template optimization with undo capability.
+
+    This function implements a sophisticated direct greedy algorithm for optimizing binary feature
+    templates with the ability to modify existing templates (the "undo" mechanism). Unlike traditional
+    greedy approaches that only add new templates, this algorithm can toggle features on/off in
+    existing templates, allowing for more flexible optimization.
+
+    The algorithm iteratively improves a collection of binary feature templates by:
+    1. Starting with initialized templates (either from scratch or pre-trained)
+    2. For each template, generating candidate modifications by toggling each feature
+    3. Creating candidate template collections by combining modified templates with unchanged ones
+    4. Evaluating the fitness of each candidate collection using classifier rewards
+    5. Selecting the collection with the highest improvement in fitness
+    6. Optionally validating performance on a separate validation set
+
+    The "undo" capability allows the algorithm to remove previously selected features if doing so
+    improves the overall template collection performance, making it more adaptive than standard
+    greedy approaches.
+
+    Args:
+        tdata (thd.TensorDict): Training data containing 'xs' (features) and 'ys' (labels).
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): Classifier used to evaluate
+            template performance and compute rewards.
+        tmpls_pt (Optional[th.Tensor]): Pre-trained templates to initialize from. If None,
+            starts with blank templates. Shape: (n_tmpls, n_covs).
+        init_fidx (int): Index of the initial feature that must be included in all templates.
+            This feature cannot be toggled off.
+        n_tmpls (int): Target number of templates to optimize.
+        max_features (Optional[int]): Maximum number of features per template. If None,
+            uses the total number of features (n_covs).
+        lmbda (float): Regularization parameter that penalizes templates with more features.
+            Higher values encourage sparser templates.
+        n_iter (int): Maximum number of optimization iterations to perform.
+        bsz (int): Batch size for processing template evaluations.
+        plf (pl.Fabric): PyTorch Lightning Fabric instance for device management and logging.
+        n_neighs (int): Number of nearest neighbors to consider for validation cost estimation.
+        vdata (Optional[thd.TensorDict]): Validation data for periodic performance evaluation.
+            If None, no validation is performed.
+        vclassifier (Optional[mymodels.classifiers.SubsetFeatureClassifier]): Classifier for
+            validation evaluation. If None, uses the training classifier.
+        metrics_func (thm.MetricCollection): Collection of metrics to compute during validation.
+        eval_every_n_iter (int): Frequency of validation evaluation (every N iterations).
+        ckpt_p (Optional[str]): Directory path for saving checkpoints. If None, no checkpoints
+            are saved.
+        generator (Optional[th.Generator]): Random number generator for reproducibility.
+            If None, uses the default generator.
+
+    Returns:
+        th.Tensor: Optimized binary template matrix of shape (n_tmpls, n_covs), where each
+            row represents a template and each element is 0 or 1 indicating feature inclusion.
+
+    Algorithm Details:
+        - **Direct Optimization**: Generates candidate modifications on-the-fly rather than
+          using pre-computed candidate pools.
+        - **Feature Toggling**: For each template, considers adding or removing each feature
+          (except the initial feature which is always included).
+        - **Collection-based Evaluation**: Evaluates entire template collections rather than
+          individual templates, accounting for redundancy and complementarity.
+        - **Adaptive Termination**: Stops early if no improvements can be found and the
+          target number of templates is reached.
+        - **Progressive Building**: Gradually builds up to the target number of templates,
+          allowing for incremental optimization.
+
+    Example:
+        ```python
+        # Initialize with 5 templates, maximum 10 features each
+        templates = make_templates_direct_greedy_with_undo(
+            tdata=training_data,
+            classifier=my_classifier,
+            tmpls_pt=None,  # Start from scratch
+            init_fidx=0,    # Always include feature 0
+            n_tmpls=5,
+            max_features=10,
+            lmbda=0.1,      # Light regularization
+            n_iter=100,
+            bsz=32,
+            plf=fabric,
+            n_neighs=5,
+            vdata=validation_data,
+            vclassifier=None,
+            metrics_func=metrics,
+            eval_every_n_iter=10
+        )
+        ```
+
+    Notes:
+        - The function requires gradient computation to be disabled (@th.no_grad()).
+        - Validation evaluation uses k-nearest neighbors cost estimation.
+        - Progress is logged through the Lightning Fabric logging system.
+        - Checkpoints save the current template state at each iteration if enabled.
+    """
+    generator = th.default_generator if generator is None else generator
+    vclassifier = classifier if vclassifier is None else vclassifier
+    if ckpt_p is not None:
+        os.makedirs(ckpt_p, exist_ok=True)
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    # initialize templates
+    tmpls: th.Tensor = (
+        th.zeros((n_tmpls, n_covs), dtype=th.long) if tmpls_pt is None else tmpls_pt
+    )
+    tmpls[:, init_fidx] = 1
+    if tmpls_pt is not None:
+        assert n_tmpls == len(tmpls)
+    # book keeping
+    _nxt_blk_idx: int = 0 if tmpls_pt is None else n_tmpls - 1
+    # direct greedy optimize
+    pbar = tqdm.trange(n_iter, desc="direct-greedy", leave=False, dynamic_ncols=True)
+    for _itr in pbar:
+        # NOTE compute tpcomp for previous round of tmpls
+        # (_ntmpls_prv, ncovs)
+        _tmpls_prv: th.Tensor = tmpls[0 : _nxt_blk_idx + 1]
+        # (ntdata, )
+        _tpcomps_prv: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+            tmpls=_tmpls_prv,
+            data=tdata,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )
+        # NOTE compute fitness of previous templates
+        # (ntdata, )
+        _rwds_prv: th.Tensor = th.max(_tpcomps_prv["rwds"], dim=1)[0]
+        # () fitness_prv is a scaler
+        _fitness_prv: th.Tensor = th.mean(_rwds_prv)
+        # NOTE make all possible future templates without duplication
+        _ntmpls: int = len(_tmpls_prv)
+        _uctmpls_inds: set[frozenset[tuple[int, ...]]] = set()
+        # for each template, generate "successor" collection of tmpls
+        for _tidx in range(_ntmpls):
+            # copy all templates except the one indexed by _tidx
+            _base_inds: set[tuple[int, ...]] = {
+                tuple(_t.tolist()) for _i, _t in enumerate(_tmpls_prv) if _i != _tidx
+            }
+            # given tidx-th template, for each possible location, toggle avaialability of one feature to tidx-th template
+            for _pos in [_i for _i in range(n_covs) if _i != init_fidx]:
+                _cinds: set[tuple[int, ...]] = copy.deepcopy(_base_inds)
+                _new_ind: th.Tensor = _tmpls_prv[_tidx].clone()
+                _new_ind[_pos] = 1 if _new_ind[_pos] == 0 else 0
+                if th.sum(_new_ind) > max_features:
+                    continue
+                _cinds.add(tuple(_new_ind.tolist()))
+                # filter out the case where the _new_ind is not something new to _base_inds
+                if len(_cinds) == len(_base_inds):
+                    continue
+                # add the complete next potential template collection back to _tctmpls_inds
+                _uctmpls_inds.add(frozenset(_cinds))
+        # NOTE make list of potential future templates
+        # a list of (_ncands, ) where each entry is (_ntmpls, )
+        _ctmpls_l: list[th.Tensor] = [th.tensor([*_inds]) for _inds in _uctmpls_inds]
+        # NOTE compute rewards
+        # make unique feature combinations
+        # keep track of all the information to recover the order
+        _ctmpls_lens_l: list[int] = list(map(len, _ctmpls_l))
+        _ctmpls_flt: th.Tensor
+        _inv_idxs: th.Tensor
+        _ctmpls_flt, _inv_idxs = th.unique(
+            th.cat(_ctmpls_l, dim=0), dim=0, return_inverse=True
+        )
+        # list of (_ncands, ) each entry being a tensor of indices to _ctmpls_flt
+        # the i-th entry of the list is the indices to which template is used to compose i-th candidate
+        _inv_idxs_l: tuple[th.Tensor, ...] = th.split(_inv_idxs, _ctmpls_lens_l)
+        # NOTE compute rewards
+        # (ntdata, )
+        _ctpcomps_flt: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+            tmpls=_ctmpls_flt,
+            data=tdata,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )
+        # (ntdata, len(_ctmpls_flt))
+        _crwds_flt: th.Tensor = _ctpcomps_flt["rwds"]
+        # NOTE compute fitness
+        # (_ncands, )
+        _cfitness: th.Tensor = th.stack(
+            [th.mean(th.max(_crwds_flt[:, _idxs], dim=1)[0]) for _idxs in _inv_idxs_l]
+        )
+        # NOTE compute improvements
+        # (_ncands, )
+        _improvements: th.Tensor = _cfitness - _fitness_prv
+        _improvements = th.clamp(_improvements, min=0.0)
+        # NOTE terminate loop if no imiprovement is made
+        if not th.any(_improvements > 0.0) and _nxt_blk_idx + 1 >= n_tmpls:
+            break
+        # NOTE choose the one with the most improvement
+        _slctd: int = int(th.argmax(_improvements, dim=0).item())
+        tmpls[0 : _nxt_blk_idx + 1] = _ctmpls_l[_slctd]
+        # NOTE if the blank template is modified, increment _nxt_blk_idx
+        if th.all(th.sum(_ctmpls_l[_slctd], dim=1) != 1) and _nxt_blk_idx + 1 < n_tmpls:
+            _nxt_blk_idx = _nxt_blk_idx + 1
+        # NOTE log metrics
+        _metrics_d: dict[str, float] = {
+            "fitness": _cfitness[_slctd].item(),
+            "improvement": _improvements[_slctd].item(),
+        }
+        pbar.set_postfix(_metrics_d)
+        plf.log_dict(
+            mylib.utils.add_prefix_to_dict(_metrics_d, "make-templates"), step=_itr
+        )
+        # NOTE keep track of validation set rollout performance
+        if vdata is not None and _itr % eval_every_n_iter == 0:
+            # (ntdata, _ncands)
+            _ctcels: th.Tensor = _ctpcomps_flt["cels"][:, _inv_idxs_l[_slctd]]
+            _vmetrics_d: dict[str, float] = tafalib_utils.evaluate(
+                data=vdata,
+                classifier=vclassifier,
+                cost_est=lambda x: tafalib_functional.knn_cost_est(
+                    x,
+                    lmbda=lmbda,
+                    txs=tdata["xs"],
+                    tcels=_ctcels,
+                    tmpls=_ctmpls_l[_slctd],
+                    n_neighs=n_neighs,
+                    p=2,
+                ),
+                init_fidx=init_fidx,
+                tmpls=_ctmpls_l[_slctd],
+                lmbda=lmbda,
+                metrics_func=metrics_func,
+                plf=plf,
+            )
+            plf.log_dict(mylib.utils.add_prefix_to_dict(_vmetrics_d, "val"), step=_itr)
+        if ckpt_p is not None:
+            th.save(tmpls, os.path.join(ckpt_p, f"tmpls_itr{_itr}.pt"))
+    pbar.close()
+    return tmpls
 
 
 # NOTE internal
