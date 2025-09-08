@@ -1089,7 +1089,6 @@ def make_templates_from_candidates_nearest_neighbors(
 def make_templates_direct_greedy_with_undo(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
-    tmpls_pt: Optional[th.Tensor],
     init_fidx: int,
     n_tmpls: int,
     max_features: Optional[int],
@@ -1097,11 +1096,12 @@ def make_templates_direct_greedy_with_undo(
     n_iter: int,
     bsz: int,
     plf: pl.Fabric,
-    n_neighs: int,
-    vdata: Optional[thd.TensorDict],
-    vclassifier: Optional[mymodels.classifiers.SubsetFeatureClassifier],
-    metrics_func: thm.MetricCollection,
-    eval_every_n_iter: int,
+    tmpls_pt: Optional[th.Tensor] = None,
+    eval_every_n_iter: int = 1,
+    n_neighs: Optional[int] = None,
+    vdata: Optional[thd.TensorDict] = None,
+    vclassifier: Optional[mymodels.classifiers.SubsetFeatureClassifier] = None,
+    metrics_func: Optional[thm.MetricCollection] = None,
     ckpt_p: Optional[str] = None,
     generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
@@ -1129,8 +1129,6 @@ def make_templates_direct_greedy_with_undo(
         tdata (thd.TensorDict): Training data containing 'xs' (features) and 'ys' (labels).
         classifier (mymodels.classifiers.SubsetFeatureClassifier): Classifier used to evaluate
             template performance and compute rewards.
-        tmpls_pt (Optional[th.Tensor]): Pre-trained templates to initialize from. If None,
-            starts with blank templates. Shape: (n_tmpls, n_covs).
         init_fidx (int): Index of the initial feature that must be included in all templates.
             This feature cannot be toggled off.
         n_tmpls (int): Target number of templates to optimize.
@@ -1141,17 +1139,22 @@ def make_templates_direct_greedy_with_undo(
         n_iter (int): Maximum number of optimization iterations to perform.
         bsz (int): Batch size for processing template evaluations.
         plf (pl.Fabric): PyTorch Lightning Fabric instance for device management and logging.
-        n_neighs (int): Number of nearest neighbors to consider for validation cost estimation.
-        vdata (Optional[thd.TensorDict]): Validation data for periodic performance evaluation.
-            If None, no validation is performed.
-        vclassifier (Optional[mymodels.classifiers.SubsetFeatureClassifier]): Classifier for
-            validation evaluation. If None, uses the training classifier.
-        metrics_func (thm.MetricCollection): Collection of metrics to compute during validation.
+        tmpls_pt (Optional[th.Tensor]): Pre-trained templates to initialize from. If None,
+            starts with blank templates. Shape: (n_tmpls, n_covs). Defaults to None.
         eval_every_n_iter (int): Frequency of validation evaluation (every N iterations).
+            Defaults to 1.
+        n_neighs (Optional[int]): Number of nearest neighbors to consider for validation cost
+            estimation. If None, validation evaluation is skipped. Defaults to None.
+        vdata (Optional[thd.TensorDict]): Validation data for periodic performance evaluation.
+            If None, no validation is performed. Defaults to None.
+        vclassifier (Optional[mymodels.classifiers.SubsetFeatureClassifier]): Classifier for
+            validation evaluation. If None, uses the training classifier. Defaults to None.
+        metrics_func (Optional[thm.MetricCollection]): Collection of metrics to compute during
+            validation. If None, validation evaluation is skipped. Defaults to None.
         ckpt_p (Optional[str]): Directory path for saving checkpoints. If None, no checkpoints
-            are saved.
+            are saved. Defaults to None.
         generator (Optional[th.Generator]): Random number generator for reproducibility.
-            If None, uses the default generator.
+            If None, uses the default generator. Defaults to None.
 
     Returns:
         th.Tensor: Optimized binary template matrix of shape (n_tmpls, n_covs), where each
@@ -1175,7 +1178,6 @@ def make_templates_direct_greedy_with_undo(
         templates = make_templates_direct_greedy_with_undo(
             tdata=training_data,
             classifier=my_classifier,
-            tmpls_pt=None,  # Start from scratch
             init_fidx=0,    # Always include feature 0
             n_tmpls=5,
             max_features=10,
@@ -1183,11 +1185,12 @@ def make_templates_direct_greedy_with_undo(
             n_iter=100,
             bsz=32,
             plf=fabric,
+            tmpls_pt=None,  # Start from scratch
+            eval_every_n_iter=10,
             n_neighs=5,
             vdata=validation_data,
             vclassifier=None,
-            metrics_func=metrics,
-            eval_every_n_iter=10
+            metrics_func=metrics
         )
         ```
 
@@ -1309,7 +1312,13 @@ def make_templates_direct_greedy_with_undo(
             mylib.utils.add_prefix_to_dict(_metrics_d, "make-templates"), step=_itr
         )
         # NOTE keep track of validation set rollout performance
-        if vdata is not None and _itr % eval_every_n_iter == 0:
+        if (
+            n_neighs is not None
+            and vdata is not None
+            and vclassifier is not None
+            and metrics_func is not None
+            and _itr % eval_every_n_iter == 0
+        ):
             # (ntdata, _ncands)
             _ctcels: th.Tensor = _ctpcomps_flt["cels"][:, _inv_idxs_l[_slctd]]
             _vmetrics_d: dict[str, float] = tafalib_utils.evaluate(
