@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import itertools as itrtls
 import math
 import os
