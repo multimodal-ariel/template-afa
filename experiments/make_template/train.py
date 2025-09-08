@@ -88,6 +88,20 @@ def main(cfg: MainConf):
     make_templates_fn: Callable = hd.utils.instantiate(
         cfg.make_templates_fn, _partial_=True
     )
+    # add eval validation envirionment kwags
+    # TODO modify tafalib.makers.templates direclty to provide common interface
+    _mktmpl_fn_kwargs: dict[str, Any] = dict()
+    if str.split(cfg.make_templates_fn._target_)[-1] in (
+        "make_templates_direct_greedy_with_undo",
+    ):
+        _mktmpl_fn_kwargs.update(
+            {
+                "n_neighs": cfg.n_neighs,
+                "vdata": vdata,
+                "vclassifier": vclassifier,
+                "metrics_func": metrics_func,
+            }
+        )
     tmpls: th.Tensor = make_templates_fn(
         tdata=tdata,
         classifier=tclassifier,
@@ -95,6 +109,7 @@ def main(cfg: MainConf):
         lmbda=cfg.lmbda,
         bsz=cfg.bsz,
         plf=plf,
+        **_mktmpl_fn_kwargs,
     )
     # save templates
     th.save(_tdata_shuffle_idxs, os.path.join(output_dir, "tdata_shuffle_idxs.pt"))
