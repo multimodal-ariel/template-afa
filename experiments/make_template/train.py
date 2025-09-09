@@ -91,7 +91,7 @@ def main(cfg: MainConf):
     # add eval validation envirionment kwags
     # TODO modify tafalib.makers.templates direclty to provide common interface
     _mktmpl_fn_kwargs: dict[str, Any] = dict()
-    if str.split(cfg.make_templates_fn._target_)[-1] in (
+    if str.split(cfg.make_templates_fn._target_, ".")[-1] in (
         "make_templates_direct_greedy_with_undo",
     ):
         _mktmpl_fn_kwargs.update(
