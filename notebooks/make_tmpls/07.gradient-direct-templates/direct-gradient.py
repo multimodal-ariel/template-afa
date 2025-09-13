@@ -111,7 +111,7 @@ def make_templates_direct_gradient(
         # TODO anneal temperature as it iterates
         _btmpls: th.Tensor = th.distributions.RelaxedBernoulli(
             temperature=th.tensor(1.0, device=plf.device), logits=ltmpls
-        ).sample()  # type:ignore
+        ).rsample()
 
         # NOTE compute cross entropy loss for each instance and template combination
         _brwds_l: list[th.Tensor]
@@ -146,7 +146,7 @@ def make_templates_direct_gradient(
         # (_bsz, n_tmpls)
         _bweights: th.Tensor = th.distributions.RelaxedOneHotCategorical(
             temperature=th.tensor(1.0, device=plf.device), logits=_brwds
-        ).sample()  # type:ignore
+        ).rsample()
         # (_bsz, )
         _bcosts: th.Tensor = th.mean(-_brwds * _bweights, dim=1)
         # compute losss
