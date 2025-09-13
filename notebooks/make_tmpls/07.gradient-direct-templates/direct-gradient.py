@@ -43,6 +43,65 @@ def simple_exponential_decay_temperature(
 
 
 # %%
+def collision_probability_penalty(ltmpls: th.Tensor) -> th.Tensor:
+    """
+    Penalize the probability that two rows will be identical in discrete space.
+
+    Args:
+        logits: (M, D) tensor of logits
+        lambda_reg: penalty strength
+
+    Mathematical intuition:
+    - For binary variables, P(bit_i == bit_j) = p_i * p_j + (1-p_i) * (1-p_j)
+    - For entire rows to be identical, ALL bits must match
+    - P(row_i == row_j) = ∏_d P(bit_i[d] == bit_j[d])
+    """
+    P = th.sigmoid(ltmpls)  # Convert logits to probabilities [0,1]
+    M, D = P.shape
+    # Expand dimensions for broadcasting
+    # P_i: (M, 1, D) - each row i broadcast across dimension 1
+    # P_j: (1, M, D) - each row j broadcast across dimension 0
+    P_i = P.unsqueeze(1)  # Shape: (M, 1, D)
+    P_j = P.unsqueeze(0)  # Shape: (1, M, D)
+    # For each pair (i,j) and each dimension d:
+    # P(bit_i[d] == bit_j[d]) = P_i[d] * P_j[d] + (1-P_i[d]) * (1-P_j[d])
+    same_bit_prob = P_i * P_j + (1 - P_i) * (1 - P_j)
+    # Shape: (M, M, D)
+    # P(row_i == row_j) = ∏_d P(bit_i[d] == bit_j[d])
+    # In log space: log(∏) = ∑log, then exp back
+    # But torch.prod works directly on small probabilities
+    collision_prob = th.prod(same_bit_prob, dim=-1)  # Shape: (M, M)
+    # Remove diagonal (self-comparisons) and avoid double-counting
+    # Upper triangular mask excludes diagonal and lower triangle
+    mask = th.triu(th.ones(M, M, device=ltmpls.device), diagonal=1)
+    return th.sum(collision_prob * mask)
+
+
+def expected_hamming_penalty(ltmpls: th.Tensor) -> th.Tensor:
+    """
+    Maximize expected Hamming distance between all pairs of rows.
+
+    Mathematical intuition:
+    - Hamming distance = number of differing bits
+    - E[HD(row_i, row_j)] = ∑_d P(bit_i[d] ≠ bit_j[d])
+    - P(bit_i[d] ≠ bit_j[d]) = p_i*(1-p_j) + (1-p_i)*p_j
+    """
+    P = th.sigmoid(ltmpls)
+    M, D = P.shape
+    P_i = P.unsqueeze(1)  # (M, 1, D)
+    P_j = P.unsqueeze(0)  # (1, M, D)
+    # P(bit differs) = P_i * (1-P_j) + (1-P_i) * P_j
+    # This is the probability that bit i is 1 and bit j is 0, OR
+    # bit i is 0 and bit j is 1
+    diff_bit_prob = P_i * (1 - P_j) + (1 - P_i) * P_j
+    # Shape: (M, M, D)
+    # Expected Hamming distance = sum over all dimensions
+    expected_hamming = th.sum(diff_bit_prob, dim=-1)  # Shape: (M, M)
+    # We want to MAXIMIZE Hamming distance, so negative penalty
+    mask = th.triu(th.ones(M, M, device=ltmpls.device), diagonal=1)
+    # Negative because we want to maximize distance (minimize negative distance)
+    return -th.sum(expected_hamming * mask)
+
 
 # %%
 @th.no_grad()
@@ -60,6 +119,8 @@ def make_templates_direct_gradient(
     bsz: int,
     bsz_compute_minibatch_cost: int,
     get_temperature_fn: Callable[[int], float],
+    compute_uniqueness_penalty_fn: Callable[[th.Tensor], th.Tensor],
+    alpha_unq: float,
     plf: pl.Fabric,
     n_neighs: int,
     vdata: Optional[thd.TensorDict],
@@ -171,8 +232,11 @@ def make_templates_direct_gradient(
         ).rsample()
         # (_bsz, )
         _bcosts: th.Tensor = th.mean(-_brwds * _bweights, dim=1)
-        # compute losss
-        _bloss: th.Tensor = th.mean(_bcosts)
+        _bunq_loss: th.Tensor = compute_uniqueness_penalty_fn(ltmpls)
+        # compute penalties
+        # TODO encourage sparsity, encourage pairwise independence
+        # compute loss
+        _bloss: th.Tensor = th.mean(_bcosts) + alpha_unq * _bunq_loss
         # back prop and update ltmpls when needed
         _bloss.backward()
         if (_itr + 1) % n_iter_gradient_accumulate == 0 or (_itr + 1) == n_iter:
@@ -180,6 +244,9 @@ def make_templates_direct_gradient(
             opt.zero_grad()
         # NOTE log metrics
         _metrics_d: dict[str, float] = {
+            "temperature": _temperature,
+            "cost": th.mean(_bcosts).item(),
+            "uniqueness_loss": _bunq_loss.item(),
             "loss": _bloss.item(),
         }
         pbar.set_postfix(_metrics_d)
