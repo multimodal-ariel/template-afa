@@ -41,6 +41,8 @@ def make_templates_direct_gradient(
     n_iter: int,
     n_iter_gradient_accumulate: int,
     bsz: int,
+    bsz_compute_minibatch_cost: int,
+    temperature_getter_fn: Callable[[int], float],
     plf: pl.Fabric,
     n_neighs: int,
     vdata: Optional[thd.TensorDict],
@@ -85,11 +87,13 @@ def make_templates_direct_gradient(
     ltmpls = ltmpls.requires_grad_(True)
     # make optimizer
     opt: th.optim.Optimizer = make_opt_fn([ltmpls])
+    opt.zero_grad()
     # direct greedy optimize
     if tmpls_pt is not None:
         assert n_tmpls == len(ltmpls)
     pbar = tqdm.trange(n_iter, desc="direct-gradient", leave=False, dynamic_ncols=True)
     for _itr in pbar:
+        _temperature: float = temperature_getter_fn(_itr)
         # NOTE draw a batch of training instances
         _bidxs: th.Tensor = (
             th.multinomial(
@@ -110,7 +114,7 @@ def make_templates_direct_gradient(
         # NOTE draw a random sample from loogit template
         # TODO anneal temperature as it iterates
         _btmpls: th.Tensor = th.distributions.RelaxedBernoulli(
-            temperature=th.tensor(1.0, device=plf.device), logits=ltmpls
+            temperature=th.tensor(_temperature, device=plf.device), logits=ltmpls
         ).rsample()
 
         # NOTE compute cross entropy loss for each instance and template combination
@@ -135,7 +139,8 @@ def make_templates_direct_gradient(
             _brwds_l = [
                 _minibatch_compute_oracle_rwd(_bbidxs)
                 for _bbidxs in th.split(
-                    th.cartesian_prod(th.arange(_bsz), th.arange(n_tmpls)), bsz
+                    th.cartesian_prod(th.arange(_bsz), th.arange(n_tmpls)),
+                    bsz_compute_minibatch_cost,
                 )
             ]
         # (_bsz, n_tmpls)
@@ -145,7 +150,7 @@ def make_templates_direct_gradient(
         # NOTE compute costs
         # (_bsz, n_tmpls)
         _bweights: th.Tensor = th.distributions.RelaxedOneHotCategorical(
-            temperature=th.tensor(1.0, device=plf.device), logits=_brwds
+            temperature=th.tensor(_temperature, device=plf.device), logits=_brwds
         ).rsample()
         # (_bsz, )
         _bcosts: th.Tensor = th.mean(-_brwds * _bweights, dim=1)
@@ -153,7 +158,7 @@ def make_templates_direct_gradient(
         _bloss: th.Tensor = th.mean(_bcosts)
         # back prop and update ltmpls when needed
         _bloss.backward()
-        if _itr % n_iter_gradient_accumulate == 0:
+        if (_itr + 1) % n_iter_gradient_accumulate == 0 or (_itr + 1) == n_iter:
             opt.step()
             opt.zero_grad()
         # NOTE log metrics
@@ -192,7 +197,8 @@ def make_templates_direct_gradient(
         if ckpt_p is not None:
             th.save(ltmpls, os.path.join(ckpt_p, f"ltmpls_itr{_itr}.pt"))
     pbar.close()
-    return ltmpls
+    tmpls: th.Tensor = th.sigmoid(ltmpls).to(dtype=th.int64)
+    return tmpls
 
 
 # %%
