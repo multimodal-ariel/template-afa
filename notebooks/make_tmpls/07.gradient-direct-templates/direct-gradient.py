@@ -104,7 +104,6 @@ def expected_hamming_penalty(ltmpls: th.Tensor) -> th.Tensor:
 
 
 # %%
-@th.no_grad()
 def make_templates_direct_gradient(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -248,14 +247,19 @@ def make_templates_direct_gradient(
             "cost": th.mean(_bcosts).item(),
             "uniqueness_loss": _bunq_loss.item(),
             "loss": _bloss.item(),
+            "gd-update": int(
+                (_itr + 1) % n_iter_gradient_accumulate == 0 or (_itr + 1) == n_iter
+            ),
         }
-        pbar.set_postfix(_metrics_d)
+        pbar.set_postfix({"loss": _bloss.item()})
         plf.log_dict(
             mylib.utils.add_prefix_to_dict(_metrics_d, "direct-gradient"), step=_itr
         )
         # NOTE keep track of validation set rollout performance
         if vdata is not None and _itr % eval_every_n_iter == 0:
-            _tmpls: th.Tensor = th.where(th.sigmoid(ltmpls) < 0.5, 0.0, 1.0)
+            _tmpls: th.Tensor = th.where(th.sigmoid(ltmpls) < 0.5, 0.0, 1.0).to(
+                device="cpu"
+            )
             _tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
                 _tmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz, plf=plf
             )
@@ -325,7 +329,7 @@ n_tmpls: int = 128
 lr: float = 1e-3
 lmbda: float = 0.075
 n_iter: int = 10_000
-n_iter_gradient_accumulate: int = 500
+n_iter_gradient_accumulate: int = 50
 n_neighs = 100
 alpha_unq: float = 0.1
 min_features: int = 1
@@ -391,11 +395,12 @@ metrics_func = thm.MetricCollection(
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "greedy-from-itrmut-tmpl")
+output_dir: str = os.path.join("outputs", "run", data_name, "direct-gradient")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
-ckpt_p: str = os.path.join(tfb_logger.log_dir, "checkpoints")
+ckpt_p: str | None = None
+# ckpt_p: str = os.path.join(tfb_logger.log_dir, "checkpoints")
 
 # %%
 plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
@@ -443,7 +448,7 @@ tmpls: th.Tensor = make_templates_direct_gradient(
     vdata=vdata,
     vclassifier=vclassifier,
     metrics_func=metrics_func,
-    eval_every_n_iter=1,
+    eval_every_n_iter=n_iter_gradient_accumulate,
     ckpt_p=ckpt_p,
 )
 
