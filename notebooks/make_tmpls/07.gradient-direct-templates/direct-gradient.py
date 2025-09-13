@@ -116,7 +116,7 @@ def make_templates_direct_gradient(
     n_iter: int,
     n_iter_gradient_accumulate: Optional[int],
     bsz: int,
-    bsz_compute_minibatch_cost: int,
+    bsz_compute_oracle: int,
     alpha_unq: float,
     get_temperature_fn: Callable[[int], float],
     compute_uniqueness_penalty_fn: Callable[[th.Tensor], th.Tensor],
@@ -221,7 +221,7 @@ def make_templates_direct_gradient(
                 _minibatch_compute_oracle_rwd(_bbidxs)
                 for _bbidxs in th.split(
                     th.cartesian_prod(th.arange(_bsz), th.arange(n_tmpls)),
-                    bsz_compute_minibatch_cost,
+                    bsz_compute_oracle,
                 )
             ]
         # (_bsz, n_tmpls)
@@ -445,7 +445,7 @@ tmpls: th.Tensor = make_templates_direct_gradient(
     n_iter=n_iter,
     n_iter_gradient_accumulate=n_iter_gradient_accumulate,
     bsz=bsz,
-    bsz_compute_minibatch_cost=bsz,
+    bsz_compute_oracle=bsz,
     get_temperature_fn=simple_exponential_decay_temperature,
     alpha_unq=alpha_unq,
     compute_uniqueness_penalty_fn=collision_probability_penalty,
