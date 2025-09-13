@@ -28,6 +28,23 @@ OmegaConf.register_new_resolver(
 
 
 # %%
+def simple_exponential_decay_temperature(
+    itr: int,
+    decay_every_n_iter=100,
+    init_temperature=1.0,
+    rate=0.5,
+    min_temperature: float = 1e-7,
+) -> float:
+    num_steps = itr // decay_every_n_iter
+    temperature: float = init_temperature * (rate**num_steps)
+    if temperature < min_temperature:
+        temperature = min_temperature
+    return temperature
+
+
+# %%
+
+# %%
 @th.no_grad()
 def make_templates_direct_gradient(
     tdata: thd.TensorDict,
@@ -42,7 +59,7 @@ def make_templates_direct_gradient(
     n_iter_gradient_accumulate: int,
     bsz: int,
     bsz_compute_minibatch_cost: int,
-    temperature_getter_fn: Callable[[int], float],
+    get_temperature_fn: Callable[[int], float],
     plf: pl.Fabric,
     n_neighs: int,
     vdata: Optional[thd.TensorDict],
@@ -93,7 +110,7 @@ def make_templates_direct_gradient(
         assert n_tmpls == len(ltmpls)
     pbar = tqdm.trange(n_iter, desc="direct-gradient", leave=False, dynamic_ncols=True)
     for _itr in pbar:
-        _temperature: float = temperature_getter_fn(_itr)
+        _temperature: float = get_temperature_fn(_itr)
         # NOTE draw a batch of training instances
         _bidxs: th.Tensor = (
             th.multinomial(
