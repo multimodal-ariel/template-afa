@@ -114,7 +114,7 @@ def make_templates_direct_gradient(
     lmbda: float,
     make_opt_fn: Callable[[Iterable[th.Tensor]], th.optim.Optimizer],
     n_iter: int,
-    n_iter_gradient_accumulate: int,
+    n_iter_gradient_accumulate: Optional[int],
     bsz: int,
     bsz_compute_minibatch_cost: int,
     alpha_unq: float,
@@ -129,6 +129,10 @@ def make_templates_direct_gradient(
     ckpt_p: Optional[str] = None,
     generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
+    n_iter_gradient_accumulate = (
+        0 if n_iter_gradient_accumulate is None else n_iter_gradient_accumulate
+    )
+    assert 0 <= n_iter_gradient_accumulate
     # initialize
     assert isinstance(
         classifier, mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier
@@ -140,8 +144,8 @@ def make_templates_direct_gradient(
     )
     if ckpt_p is not None:
         os.makedirs(ckpt_p, exist_ok=True)
-    classifier = classifier.to(device=plf.device)
-    vclassifier = vclassifier.to(device=plf.device)
+    classifier = classifier.eval().to(device=plf.device)
+    vclassifier = vclassifier.eval().to(device=plf.device)
     # record shapes
     n_data: int = len(tdata)
     n_covs: int = tdata["xs"].shape[1]
@@ -238,7 +242,10 @@ def make_templates_direct_gradient(
         _bloss: th.Tensor = th.mean(_bcosts) + alpha_unq * _bunq_loss
         # back prop and update ltmpls when needed
         _bloss.backward()
-        if (_itr + 1) % n_iter_gradient_accumulate == 0 or (_itr + 1) == n_iter:
+        _to_update: bool = ((_itr + 1) % (n_iter_gradient_accumulate + 1) == 0) or (
+            (_itr + 1) == n_iter
+        )
+        if _to_update:
             opt.step()
             opt.zero_grad()
         # NOTE log metrics
@@ -247,9 +254,7 @@ def make_templates_direct_gradient(
             "cost": th.mean(_bcosts).item(),
             "uniqueness_loss": _bunq_loss.item(),
             "loss": _bloss.item(),
-            "gd-update": int(
-                (_itr + 1) % n_iter_gradient_accumulate == 0 or (_itr + 1) == n_iter
-            ),
+            "gd-update": int(_to_update),
         }
         pbar.set_postfix({"loss": _bloss.item()})
         plf.log_dict(
@@ -326,10 +331,11 @@ vclassifier = tclassifier
 max_tdata: Optional[int] = None
 init_fidx: int = 35
 n_tmpls: int = 128
-lr: float = 1e-3
+lr: float = 1e-1
 lmbda: float = 0.075
 n_iter: int = 10_000
-n_iter_gradient_accumulate: int = 50
+# n_iter_gradient_accumulate: int | None = 50
+n_iter_gradient_accumulate: int | None = None
 n_neighs = 100
 alpha_unq: float = 0.1
 min_features: int = 1
@@ -448,7 +454,11 @@ tmpls: th.Tensor = make_templates_direct_gradient(
     vdata=vdata,
     vclassifier=vclassifier,
     metrics_func=metrics_func,
-    eval_every_n_iter=n_iter_gradient_accumulate,
+    eval_every_n_iter=(
+        n_iter_gradient_accumulate
+        if n_iter_gradient_accumulate is not None and n_iter_gradient_accumulate > 0
+        else 1
+    ),
     ckpt_p=ckpt_p,
 )
 
