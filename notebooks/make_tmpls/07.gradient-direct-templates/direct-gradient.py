@@ -118,9 +118,9 @@ def make_templates_direct_gradient(
     n_iter_gradient_accumulate: int,
     bsz: int,
     bsz_compute_minibatch_cost: int,
+    alpha_unq: float,
     get_temperature_fn: Callable[[int], float],
     compute_uniqueness_penalty_fn: Callable[[th.Tensor], th.Tensor],
-    alpha_unq: float,
     plf: pl.Fabric,
     n_neighs: int,
     vdata: Optional[thd.TensorDict],
@@ -286,275 +286,284 @@ def make_templates_direct_gradient(
 
 
 # %%
-# # NOTE big5
-# data_name: str = "big5_C_cls"
+# NOTE big5
+data_name: str = "big5_C_cls"
+_tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
+n_covs: int = _tdata["xs"].shape[1]
+n_labels: int = len(th.unique(_tdata["ys"]))
+_tdata_shuffle_idxs = th.randperm(len(_tdata))
+tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
+extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
+tmpl_run_p: Optional[str] = None
+tmpls_pt: Optional[th.Tensor] = None
+nnet_run_p: str = (
+    "experiments/pretrain/nnet_subset_feature_classifier/outputs/big5/20250312_224514"
+)
+nnet_run_p = os.path.join(mylib.utils.get_project_root_dir(), nnet_run_p)
+nnet_run_cfg = OmegaConf.load(os.path.join(nnet_run_p, ".hydra", "config.yaml"))
+tclassifier = (
+    mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
+        nnet=hd.utils.instantiate(
+            nnet_run_cfg.nnet,
+            in_features=n_covs * 2,
+            out_features=n_labels,
+        ),
+        xs_train=tdata["xs"].numpy(),
+        ys_train=tdata["ys"].numpy(),
+        fit_kwargs=hd.utils.instantiate(nnet_run_cfg.nnet_fit_cfg),
+        state_dict_p=os.path.join(
+            mylib.utils.get_project_root_dir(), nnet_run_p, "classifier.pt"
+        ),
+    )
+)
+tclassifier.fit_kwargs["n_iter"] = 1000
+tclassifier.fit_kwargs["bsz"] = 8192
+vclassifier = tclassifier
+max_tdata: Optional[int] = None
+init_fidx: int = 35
+n_tmpls: int = 128
+lr: float = 1e-3
+lmbda: float = 0.075
+n_iter: int = 10_000
+n_iter_gradient_accumulate: int = 500
+n_neighs = 100
+alpha_unq: float = 0.1
+min_features: int = 1
+max_features: Optional[int] = None
+bsz: int = 409600
+
+# %%
+# NOTE this block is optional and is only needed if we want
+tmpl_run_p = "experiments/make_template/outputs/big5_cnnet/20250314_112541/12"
+tmpl_run_p = os.path.join(mylib.utils.get_project_root_dir(), tmpl_run_p)
+
+# %%
+# # NOTE charfont-1500
+# data_name: str = "charfont-1500"
 # _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
 # n_covs: int = _tdata["xs"].shape[1]
 # n_labels: int = len(th.unique(_tdata["ys"]))
+# max_tdata: Optional[int] = 8192
 # _tdata_shuffle_idxs = th.randperm(len(_tdata))
 # tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
 # extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
-# tmpl_run_p: Optional[str] = None
-# tmpls_pt: Optional[th.Tensor] = None
-# nnet_run_p: str = (
-#     "experiments/pretrain/nnet_subset_feature_classifier/outputs/big5/20250312_224514"
+# run_p: str = (
+#     "experiments/pretrain/nnet_subset_feature_classifier/outputs/charfont-1500/20250624_170501"
 # )
-# nnet_run_p = os.path.join(mylib.utils.get_project_root_dir(), nnet_run_p)
-# nnet_run_cfg = OmegaConf.load(os.path.join(nnet_run_p, ".hydra", "config.yaml"))
+# run_cfg = OmegaConf.load(
+#     os.path.join(mylib.utils.get_project_root_dir(), run_p, ".hydra", "config.yaml")
+# )
 # tclassifier = (
 #     mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
 #         nnet=hd.utils.instantiate(
-#             nnet_run_cfg.nnet,
+#             run_cfg.nnet,
 #             in_features=n_covs * 2,
 #             out_features=n_labels,
 #         ),
 #         xs_train=tdata["xs"].numpy(),
 #         ys_train=tdata["ys"].numpy(),
-#         fit_kwargs=hd.utils.instantiate(nnet_run_cfg.nnet_fit_cfg),
+#         fit_kwargs=hd.utils.instantiate(run_cfg.nnet_fit_cfg),
 #         state_dict_p=os.path.join(
-#             mylib.utils.get_project_root_dir(), nnet_run_p, "classifier.pt"
+#             mylib.utils.get_project_root_dir(), run_p, "classifier.pt"
 #         ),
 #     )
 # )
-# tclassifier.fit_kwargs["n_iter"] = 1000
-# tclassifier.fit_kwargs["bsz"] = 8192
-# vclassifier = tclassifier
-# max_tdata: Optional[int] = None
-# init_fidx: int = 35
-# n_tmpls: int = 128
+# tclassifier.fit_kwargs["n_iter"] = 10
+# vclassifier = None
+# init_fidx: int | None = 132
+# n_tmpls_targ: int = 128
+# n_cands_targ: int = 10_000
 # lmbda: float = 0.075
-# n_iter: int = 4096
-# n_neighs = 100
-# min_features: int = 1
-# max_features: Optional[int] = None
-# bsz: int = 409600
+# min_features_targ: int = 1
+# max_features_targ: Optional[int] = None
+# bsz: int = 8192
 
-# # %%
-# # NOTE this block is optional and is only needed if we want
-# tmpl_run_p = "experiments/make_template/outputs/big5_cnnet/20250314_112541/12"
-# tmpl_run_p = os.path.join(mylib.utils.get_project_root_dir(), tmpl_run_p)
+# %%
+metrics_func = thm.MetricCollection(
+    {
+        "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
+        "precision": thm.Precision(task="multiclass", num_classes=n_labels),
+        "recall": thm.Recall(task="multiclass", num_classes=n_labels),
+        "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
+        "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
+    }
+)
 
-# # %%
-# # # NOTE charfont-1500
-# # data_name: str = "charfont-1500"
-# # _tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(data_name, to_normalize=False)
-# # n_covs: int = _tdata["xs"].shape[1]
-# # n_labels: int = len(th.unique(_tdata["ys"]))
-# # max_tdata: Optional[int] = 8192
-# # _tdata_shuffle_idxs = th.randperm(len(_tdata))
-# # tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
-# # extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
-# # run_p: str = (
-# #     "experiments/pretrain/nnet_subset_feature_classifier/outputs/charfont-1500/20250624_170501"
-# # )
-# # run_cfg = OmegaConf.load(
-# #     os.path.join(mylib.utils.get_project_root_dir(), run_p, ".hydra", "config.yaml")
-# # )
-# # tclassifier = (
-# #     mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
-# #         nnet=hd.utils.instantiate(
-# #             run_cfg.nnet,
-# #             in_features=n_covs * 2,
-# #             out_features=n_labels,
-# #         ),
-# #         xs_train=tdata["xs"].numpy(),
-# #         ys_train=tdata["ys"].numpy(),
-# #         fit_kwargs=hd.utils.instantiate(run_cfg.nnet_fit_cfg),
-# #         state_dict_p=os.path.join(
-# #             mylib.utils.get_project_root_dir(), run_p, "classifier.pt"
-# #         ),
-# #     )
-# # )
-# # tclassifier.fit_kwargs["n_iter"] = 10
-# # vclassifier = None
-# # init_fidx: int | None = 132
-# # n_tmpls_targ: int = 128
-# # n_cands_targ: int = 10_000
-# # lmbda: float = 0.075
-# # min_features_targ: int = 1
-# # max_features_targ: Optional[int] = None
-# # bsz: int = 8192
+# %%
+# configure logger and ckpt path
+output_dir: str = os.path.join("outputs", "run", data_name, "greedy-from-itrmut-tmpl")
+os.makedirs(output_dir, exist_ok=True)
+tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
+csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
+ckpt_p: str = os.path.join(tfb_logger.log_dir, "checkpoints")
 
-# # %%
-# metrics_func = thm.MetricCollection(
-#     {
-#         "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
-#         "precision": thm.Precision(task="multiclass", num_classes=n_labels),
-#         "recall": thm.Recall(task="multiclass", num_classes=n_labels),
-#         "f1-score": thm.F1Score(task="multiclass", num_classes=n_labels),
-#         "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
-#     }
+# %%
+plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
+
+# %%
+if tmpl_run_p is not None:
+    tmpls_pt = th.load(os.path.join(tmpl_run_p, "tmpls.pt"), weights_only=False)
+    mktmpl_run_cfg = OmegaConf.load(os.path.join(tmpl_run_p, ".hydra", "config.yaml"))
+    lmbda = mktmpl_run_cfg.lmbda
+    n_neighs = mktmpl_run_cfg.n_neighs
+    init_fidx = mktmpl_run_cfg.init_fidx
+
+# %%
+if init_fidx is None:
+    init_fidx, bestfm = tafalib.makers.templates.identify_init_fidx(
+        tdata=tdata,
+        classifier=tclassifier,
+        max_features=max_features,
+        n_repeat=2,
+        n_masks=500,
+        lmbda=lmbda,
+        bsz=bsz,
+        plf=plf,
+    )
+
+# %%
+tmpls: th.Tensor = make_templates_direct_gradient(
+    tdata=tdata,
+    classifier=tclassifier,
+    tmpls_pt=tmpls_pt,
+    init_fidx=init_fidx,
+    n_tmpls=n_tmpls,
+    max_features=max_features,
+    lmbda=lmbda,
+    make_opt_fn=lambda _p: th.optim.Adam(_p, lr=lr),
+    n_iter=n_iter,
+    n_iter_gradient_accumulate=n_iter_gradient_accumulate,
+    bsz=bsz,
+    bsz_compute_minibatch_cost=bsz,
+    get_temperature_fn=simple_exponential_decay_temperature,
+    alpha_unq=alpha_unq,
+    compute_uniqueness_penalty_fn=collision_probability_penalty,
+    plf=plf,
+    n_neighs=n_neighs,
+    vdata=vdata,
+    vclassifier=vclassifier,
+    metrics_func=metrics_func,
+    eval_every_n_iter=1,
+    ckpt_p=ckpt_p,
+)
+
+# %%
+# tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+#     tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz, plf=plf
 # )
 
 # # %%
-# # configure logger and ckpt path
-# output_dir: str = os.path.join("outputs", "run", data_name, "greedy-from-itrmut-tmpl")
-# os.makedirs(output_dir, exist_ok=True)
-# tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
-# csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
-# ckpt_p: str = os.path.join(tfb_logger.log_dir, "checkpoints")
-
-# # %%
-# plf = pl.Fabric(loggers=[tfb_logger, csv_logger], accelerator="auto")
-
-# # %%
-# if tmpl_run_p is not None:
-#     tmpls_pt = th.load(os.path.join(tmpl_run_p, "tmpls.pt"), weights_only=False)
-#     mktmpl_run_cfg = OmegaConf.load(os.path.join(tmpl_run_p, ".hydra", "config.yaml"))
-#     lmbda = mktmpl_run_cfg.lmbda
-#     n_neighs = mktmpl_run_cfg.n_neighs
-#     init_fidx = mktmpl_run_cfg.init_fidx
-
-# # %%
-# if init_fidx is None:
-#     init_fidx, bestfm = tafalib.makers.templates.identify_init_fidx(
-#         tdata=tdata,
-#         classifier=tclassifier,
-#         max_features=max_features,
-#         n_repeat=2,
-#         n_masks=500,
-#         lmbda=lmbda,
-#         bsz=bsz,
+# metrics_func.reset()
+# snfobsd_l: list[int] = list()
+# snfcomb_l: list[int] = list()
+# for _data in vdata:
+#     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
+#         x=_data["xs"],
+#         classifier=vclassifier,
+#         cost_est=lambda x: tafalib.functional.knn_cost_est(
+#             x,
+#             lmbda=lmbda,
+#             txs=tdata["xs"],
+#             tcels=tpcomp["cels"],
+#             tmpls=tmpls,
+#             n_neighs=10,
+#             p=2,
+#         ),
+#         init_fidx=init_fidx,
+#         tmpls=tmpls,
 #         plf=plf,
 #     )
-
-# # %%
-# tmpls: th.Tensor = make_templates_direct_greedy(
-#     tdata=tdata,
-#     classifier=tclassifier,
-#     tmpls_pt=tmpls_pt,
-#     init_fidx=init_fidx,
-#     n_tmpls=n_tmpls,
-#     max_features=max_features,
-#     lmbda=lmbda,
-#     n_iter=n_iter,
-#     bsz=bsz,
-#     plf=plf,
-#     n_neighs=n_neighs,
-#     vdata=vdata,
-#     vclassifier=vclassifier,
-#     metrics_func=metrics_func,
-#     eval_every_n_iter=1,
-#     ckpt_p=ckpt_p,
+#     snfobsd_l.append(len(_fobsd_l))
+#     snfcomb_l.append(len(_fcomb))
+#     metrics_func.update(
+#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+#     )
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "init_fidx": init_fidx,
+#         "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
+#         "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
+#     }
 # )
+# print(pd.Series(metrics_d))
+
 
 # # %%
-# # tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
-# #     tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz, plf=plf
-# # )
+# metrics_func.reset()
+# snfobsd_l: list[int] = list()
+# snfcomb_l: list[int] = list()
+# for _data in vdata:
+#     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
+#         x=_data["xs"],
+#         classifier=vclassifier,
+#         cost_est=lambda x: tafalib.functional.knn_cost_est(
+#             x,
+#             lmbda=lmbda,
+#             txs=tdata["xs"],
+#             tcels=tpcomp["cels"],
+#             tmpls=tmpls,
+#             n_neighs=10,
+#             p=2,
+#         ),
+#         init_fidx=init_fidx,
+#         tmpls=tmpls,
+#         plf=plf,
+#     )
+#     snfobsd_l.append(len(_fobsd_l))
+#     snfcomb_l.append(len(_fcomb))
+#     metrics_func.update(
+#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+#     )
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "init_fidx": init_fidx,
+#         "feature used & observed": th.mean(
+#             th.as_tensor(snfobsd_l, dtype=th.float32)
+#         ).item(),
+#     }
+# )
+# print(pd.Series(metrics_d))
 
-# # # %%
-# # metrics_func.reset()
-# # snfobsd_l: list[int] = list()
-# # snfcomb_l: list[int] = list()
-# # for _data in vdata:
-# #     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
-# #         x=_data["xs"],
-# #         classifier=vclassifier,
-# #         cost_est=lambda x: tafalib.functional.knn_cost_est(
-# #             x,
-# #             lmbda=lmbda,
-# #             txs=tdata["xs"],
-# #             tcels=tpcomp["cels"],
-# #             tmpls=tmpls,
-# #             n_neighs=10,
-# #             p=2,
-# #         ),
-# #         init_fidx=init_fidx,
-# #         tmpls=tmpls,
-# #         plf=plf,
-# #     )
-# #     snfobsd_l.append(len(_fobsd_l))
-# #     snfcomb_l.append(len(_fcomb))
-# #     metrics_func.update(
-# #         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-# #     )
-# # metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-# # metrics_func.reset()
-# # metrics_d.update(
-# #     {
-# #         "init_fidx": init_fidx,
-# #         "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
-# #         "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
-# #     }
-# # )
-# # print(pd.Series(metrics_d))
-
-
-# # # %%
-# # metrics_func.reset()
-# # snfobsd_l: list[int] = list()
-# # snfcomb_l: list[int] = list()
-# # for _data in vdata:
-# #     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
-# #         x=_data["xs"],
-# #         classifier=vclassifier,
-# #         cost_est=lambda x: tafalib.functional.knn_cost_est(
-# #             x,
-# #             lmbda=lmbda,
-# #             txs=tdata["xs"],
-# #             tcels=tpcomp["cels"],
-# #             tmpls=tmpls,
-# #             n_neighs=10,
-# #             p=2,
-# #         ),
-# #         init_fidx=init_fidx,
-# #         tmpls=tmpls,
-# #         plf=plf,
-# #     )
-# #     snfobsd_l.append(len(_fobsd_l))
-# #     snfcomb_l.append(len(_fcomb))
-# #     metrics_func.update(
-# #         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-# #     )
-# # metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-# # metrics_func.reset()
-# # metrics_d.update(
-# #     {
-# #         "init_fidx": init_fidx,
-# #         "feature used & observed": th.mean(
-# #             th.as_tensor(snfobsd_l, dtype=th.float32)
-# #         ).item(),
-# #     }
-# # )
-# # print(pd.Series(metrics_d))
-
-# # # %%
-# # metrics_func.reset()
-# # snfobsd_l: list[int] = list()
-# # snfcomb_l: list[int] = list()
-# # for _data in vdata:
-# #     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
-# #         x=_data["xs"],
-# #         classifier=tclassifier,
-# #         cost_est=lambda x: tafalib.functional.knn_cost_est(
-# #             x,
-# #             lmbda=lmbda,
-# #             txs=tdata["xs"],
-# #             tcels=tpcomp["cels"],
-# #             tmpls=tmpls,
-# #             n_neighs=10,
-# #             p=2,
-# #         ),
-# #         init_fidx=init_fidx,
-# #         tmpls=tmpls,
-# #         plf=plf,
-# #     )
-# #     snfobsd_l.append(len(_fobsd_l))
-# #     snfcomb_l.append(len(_fcomb))
-# #     metrics_func.update(
-# #         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-# #     )
-# # metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-# # metrics_func.reset()
-# # metrics_d.update(
-# #     {
-# #         "init_fidx": init_fidx,
-# #         "feature used & observed": th.mean(
-# #             th.as_tensor(snfobsd_l, dtype=th.float32)
-# #         ).item(),
-# #     }
-# # )
-# # print(pd.Series(metrics_d))
+# # %%
+# metrics_func.reset()
+# snfobsd_l: list[int] = list()
+# snfcomb_l: list[int] = list()
+# for _data in vdata:
+#     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
+#         x=_data["xs"],
+#         classifier=tclassifier,
+#         cost_est=lambda x: tafalib.functional.knn_cost_est(
+#             x,
+#             lmbda=lmbda,
+#             txs=tdata["xs"],
+#             tcels=tpcomp["cels"],
+#             tmpls=tmpls,
+#             n_neighs=10,
+#             p=2,
+#         ),
+#         init_fidx=init_fidx,
+#         tmpls=tmpls,
+#         plf=plf,
+#     )
+#     snfobsd_l.append(len(_fobsd_l))
+#     snfcomb_l.append(len(_fcomb))
+#     metrics_func.update(
+#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+#     )
+# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+# metrics_func.reset()
+# metrics_d.update(
+#     {
+#         "init_fidx": init_fidx,
+#         "feature used & observed": th.mean(
+#             th.as_tensor(snfobsd_l, dtype=th.float32)
+#         ).item(),
+#     }
+# )
+# print(pd.Series(metrics_d))
 
 # %%
