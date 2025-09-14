@@ -289,7 +289,7 @@ def make_templates_minibatch_gradient(
         if ckpt_p is not None:
             th.save(ltmpls, os.path.join(ckpt_p, f"ltmpls_itr{_itr}.pt"))
     pbar.close()
-    tmpls: th.Tensor = th.sigmoid(ltmpls).to(dtype=th.int64)
+    tmpls: th.Tensor = th.sigmoid(ltmpls).to(dtype=th.int64, device="cpu")
     return tmpls
 
 
@@ -458,122 +458,122 @@ tmpls: th.Tensor = make_templates_minibatch_gradient(
 )
 
 # %%
-# tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
-#     tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz, plf=plf
-# )
+tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+    tmpls=tmpls, data=tdata, classifier=tclassifier, lmbda=lmbda, bsz=bsz, plf=plf
+)
 
-# # %%
-# metrics_func.reset()
-# snfobsd_l: list[int] = list()
-# snfcomb_l: list[int] = list()
-# for _data in vdata:
-#     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
-#         x=_data["xs"],
-#         classifier=vclassifier,
-#         cost_est=lambda x: tafalib.functional.knn_cost_est(
-#             x,
-#             lmbda=lmbda,
-#             txs=tdata["xs"],
-#             tcels=tpcomp["cels"],
-#             tmpls=tmpls,
-#             n_neighs=10,
-#             p=2,
-#         ),
-#         init_fidx=init_fidx,
-#         tmpls=tmpls,
-#         plf=plf,
-#     )
-#     snfobsd_l.append(len(_fobsd_l))
-#     snfcomb_l.append(len(_fcomb))
-#     metrics_func.update(
-#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-#     )
-# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-# metrics_func.reset()
-# metrics_d.update(
-#     {
-#         "init_fidx": init_fidx,
-#         "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
-#         "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
-#     }
-# )
-# print(pd.Series(metrics_d))
+# %%
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode(
+        x=_data["xs"],
+        classifier=vclassifier,
+        cost_est=lambda x: tafalib.functional.knn_cost_est(
+            x,
+            lmbda=lmbda,
+            txs=tdata["xs"],
+            tcels=tpcomp["cels"],
+            tmpls=tmpls,
+            n_neighs=10,
+            p=2,
+        ),
+        init_fidx=init_fidx,
+        tmpls=tmpls,
+        plf=plf,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "init_fidx": init_fidx,
+        "feature observed": th.mean(th.as_tensor(snfobsd_l, dtype=th.float32)).item(),
+        "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
+    }
+)
+print(pd.Series(metrics_d))
 
 
-# # %%
-# metrics_func.reset()
-# snfobsd_l: list[int] = list()
-# snfcomb_l: list[int] = list()
-# for _data in vdata:
-#     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
-#         x=_data["xs"],
-#         classifier=vclassifier,
-#         cost_est=lambda x: tafalib.functional.knn_cost_est(
-#             x,
-#             lmbda=lmbda,
-#             txs=tdata["xs"],
-#             tcels=tpcomp["cels"],
-#             tmpls=tmpls,
-#             n_neighs=10,
-#             p=2,
-#         ),
-#         init_fidx=init_fidx,
-#         tmpls=tmpls,
-#         plf=plf,
-#     )
-#     snfobsd_l.append(len(_fobsd_l))
-#     snfcomb_l.append(len(_fcomb))
-#     metrics_func.update(
-#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-#     )
-# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-# metrics_func.reset()
-# metrics_d.update(
-#     {
-#         "init_fidx": init_fidx,
-#         "feature used & observed": th.mean(
-#             th.as_tensor(snfobsd_l, dtype=th.float32)
-#         ).item(),
-#     }
-# )
-# print(pd.Series(metrics_d))
+# %%
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
+        x=_data["xs"],
+        classifier=vclassifier,
+        cost_est=lambda x: tafalib.functional.knn_cost_est(
+            x,
+            lmbda=lmbda,
+            txs=tdata["xs"],
+            tcels=tpcomp["cels"],
+            tmpls=tmpls,
+            n_neighs=10,
+            p=2,
+        ),
+        init_fidx=init_fidx,
+        tmpls=tmpls,
+        plf=plf,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "init_fidx": init_fidx,
+        "feature used & observed": th.mean(
+            th.as_tensor(snfobsd_l, dtype=th.float32)
+        ).item(),
+    }
+)
+print(pd.Series(metrics_d))
 
-# # %%
-# metrics_func.reset()
-# snfobsd_l: list[int] = list()
-# snfcomb_l: list[int] = list()
-# for _data in vdata:
-#     _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
-#         x=_data["xs"],
-#         classifier=tclassifier,
-#         cost_est=lambda x: tafalib.functional.knn_cost_est(
-#             x,
-#             lmbda=lmbda,
-#             txs=tdata["xs"],
-#             tcels=tpcomp["cels"],
-#             tmpls=tmpls,
-#             n_neighs=10,
-#             p=2,
-#         ),
-#         init_fidx=init_fidx,
-#         tmpls=tmpls,
-#         plf=plf,
-#     )
-#     snfobsd_l.append(len(_fobsd_l))
-#     snfcomb_l.append(len(_fcomb))
-#     metrics_func.update(
-#         _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
-#     )
-# metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
-# metrics_func.reset()
-# metrics_d.update(
-#     {
-#         "init_fidx": init_fidx,
-#         "feature used & observed": th.mean(
-#             th.as_tensor(snfobsd_l, dtype=th.float32)
-#         ).item(),
-#     }
-# )
-# print(pd.Series(metrics_d))
+# %%
+metrics_func.reset()
+snfobsd_l: list[int] = list()
+snfcomb_l: list[int] = list()
+for _data in vdata:
+    _pyhat, _fobsd_l, _fcomb = tafalib.utils.run_one_episode_all_obsd(
+        x=_data["xs"],
+        classifier=tclassifier,
+        cost_est=lambda x: tafalib.functional.knn_cost_est(
+            x,
+            lmbda=lmbda,
+            txs=tdata["xs"],
+            tcels=tpcomp["cels"],
+            tmpls=tmpls,
+            n_neighs=10,
+            p=2,
+        ),
+        init_fidx=init_fidx,
+        tmpls=tmpls,
+        plf=plf,
+    )
+    snfobsd_l.append(len(_fobsd_l))
+    snfcomb_l.append(len(_fcomb))
+    metrics_func.update(
+        _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
+    )
+metrics_d: dict[str, float] = {k: v.item() for k, v in metrics_func.compute().items()}
+metrics_func.reset()
+metrics_d.update(
+    {
+        "init_fidx": init_fidx,
+        "feature used & observed": th.mean(
+            th.as_tensor(snfobsd_l, dtype=th.float32)
+        ).item(),
+    }
+)
+print(pd.Series(metrics_d))
 
 # %%
