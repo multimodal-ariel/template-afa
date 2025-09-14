@@ -10,6 +10,7 @@ import _classifiers
 import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
+import torch.utils.data as th_data
 import mydatasets
 import mylib
 import mymodels
@@ -104,7 +105,7 @@ def expected_hamming_penalty(ltmpls: th.Tensor) -> th.Tensor:
 
 
 # %%
-def make_templates_direct_gradient(
+def make_templates_minibatch_gradient(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     tmpls_pt: Optional[th.Tensor],
@@ -114,9 +115,9 @@ def make_templates_direct_gradient(
     lmbda: float,
     make_opt_fn: Callable[[Iterable[th.Tensor]], th.optim.Optimizer],
     n_iter: int,
-    n_iter_gradient_accumulate: Optional[int],
+    # n_iter_gradient_accumulate: Optional[int],
     bsz: int,
-    bsz_compute_minibatch_cost: int,
+    bsz_compute_oracle: int,
     alpha_unq: float,
     get_temperature_fn: Callable[[int], float],
     compute_uniqueness_penalty_fn: Callable[[th.Tensor], th.Tensor],
@@ -129,10 +130,10 @@ def make_templates_direct_gradient(
     ckpt_p: Optional[str] = None,
     generator: Optional[th.Generator] = None,
 ) -> th.Tensor:
-    n_iter_gradient_accumulate = (
-        0 if n_iter_gradient_accumulate is None else n_iter_gradient_accumulate
-    )
-    assert 0 <= n_iter_gradient_accumulate
+    # n_iter_gradient_accumulate = (
+    #     0 if n_iter_gradient_accumulate is None else n_iter_gradient_accumulate
+    # )
+    # assert 0 <= n_iter_gradient_accumulate
     # initialize
     assert isinstance(
         classifier, mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier
@@ -146,8 +147,10 @@ def make_templates_direct_gradient(
         os.makedirs(ckpt_p, exist_ok=True)
     classifier = classifier.eval().to(device=plf.device)
     vclassifier = vclassifier.eval().to(device=plf.device)
+    tloader = th_data.DataLoader(
+        tdata, batch_size=bsz, collate_fn=lambda x: x  # type:ignore
+    )
     # record shapes
-    n_data: int = len(tdata)
     n_covs: int = tdata["xs"].shape[1]
     max_features = n_covs if max_features is None else max_features
     # initialize templates in logit space
@@ -173,92 +176,88 @@ def make_templates_direct_gradient(
     if tmpls_pt is not None:
         assert n_tmpls == len(ltmpls)
     pbar = tqdm.trange(n_iter, desc="direct-gradient", leave=False, dynamic_ncols=True)
+    _step: int = 0
     for _itr in pbar:
         _temperature: float = get_temperature_fn(_itr)
-        # NOTE draw a batch of training instances
-        _bidxs: th.Tensor = (
-            th.multinomial(
-                th.ones(n_data),
-                num_samples=bsz,
-                replacement=False,
-                generator=generator,
-            )
-            if bsz < n_data
-            else th.arange(n_data)
-        )
-        _bsz: int = len(_bidxs)
-        _btdata = tdata[_bidxs]
-        # (_btdata, n_covs)
-        _btxs: th.Tensor = _btdata["xs"]
-        # (_btdata, )
-        _btys: th.Tensor = _btdata["ys"]
-        # NOTE draw a random sample from loogit template
-        # TODO anneal temperature as it iterates
-        _btmpls: th.Tensor = th.distributions.RelaxedBernoulli(
-            temperature=th.tensor(_temperature, device=plf.device), logits=ltmpls
-        ).rsample()
+        for _btdata in tloader:
+            _btdata: thd.TensorDict
+            _bsz: int = len(_btdata)
+            # (_btdata, n_covs)
+            _btxs: th.Tensor = _btdata["xs"]
+            # (_btdata, )
+            _btys: th.Tensor = _btdata["ys"]
+            # NOTE draw a random sample from loogit template
+            # TODO anneal temperature as it iterates
+            _btmpls: th.Tensor = th.distributions.RelaxedBernoulli(
+                temperature=th.tensor(_temperature, device=plf.device), logits=ltmpls
+            ).rsample()
 
-        # NOTE compute cross entropy loss for each instance and template combination
-        _brwds_l: list[th.Tensor]
+            # NOTE compute cross entropy loss for each instance and template combination
+            _brwds_l: list[th.Tensor]
 
-        def _minibatch_compute_oracle_rwd(_bbidxs: th.Tensor) -> th.Tensor:
-            # (_bsz, n_covs)
-            _bbctxs: th.Tensor = _btxs[_bbidxs[:, 0], :].to(device=plf.device)
-            _bbacts: th.Tensor = _btmpls[_bbidxs[:, 1], :].to(device=plf.device)
-            # (_bsz, n_labels)
-            _bbpyhats: th.Tensor = classifier.predict_proba(_bbctxs, _bbacts)
-            # (_bsz, )
-            _bbcels: th.Tensor = th.nn.functional.cross_entropy(
-                _bbpyhats,
-                _btys[_bbidxs[:, 0]].to(device=plf.device),
-                reduction="none",
-            )
-            _bbrwds: th.Tensor = -_bbcels - lmbda * th.sum(_bbacts, dim=1)
-            return _bbrwds
-
-        with th.autograd.graph.save_on_cpu():
-            _brwds_l = [
-                _minibatch_compute_oracle_rwd(_bbidxs)
-                for _bbidxs in th.split(
-                    th.cartesian_prod(th.arange(_bsz), th.arange(n_tmpls)),
-                    bsz_compute_minibatch_cost,
+            def _minibatch_compute_oracle_rwd(_bbidxs: th.Tensor) -> th.Tensor:
+                # (_bsz, n_covs)
+                _bbctxs: th.Tensor = _btxs[_bbidxs[:, 0], :].to(device=plf.device)
+                _bbacts: th.Tensor = _btmpls[_bbidxs[:, 1], :].to(device=plf.device)
+                # (_bsz, n_labels)
+                _bbpyhats: th.Tensor = classifier.predict_proba(_bbctxs, _bbacts)
+                # (_bsz, )
+                _bbcels: th.Tensor = th.nn.functional.cross_entropy(
+                    _bbpyhats,
+                    _btys[_bbidxs[:, 0]].to(device=plf.device),
+                    reduction="none",
                 )
-            ]
-        # (_bsz, n_tmpls)
-        _brwds: th.Tensor = th.unflatten(
-            th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_tmpls)
-        )
-        # NOTE compute costs
-        # (_bsz, n_tmpls)
-        _bweights: th.Tensor = th.distributions.RelaxedOneHotCategorical(
-            temperature=th.tensor(_temperature, device=plf.device), logits=_brwds
-        ).rsample()
-        # (_bsz, )
-        _bcosts: th.Tensor = th.mean(-_brwds * _bweights, dim=1)
-        _bunq_loss: th.Tensor = compute_uniqueness_penalty_fn(ltmpls)
-        # compute penalties
-        # TODO encourage sparsity, encourage pairwise independence
-        # compute loss
-        _bloss: th.Tensor = th.mean(_bcosts) + alpha_unq * _bunq_loss
-        # back prop and update ltmpls when needed
-        _bloss.backward()
-        _to_update: bool = ((_itr + 1) % (n_iter_gradient_accumulate + 1) == 0) or (
-            (_itr + 1) == n_iter
-        )
-        if _to_update:
-            opt.step()
-            opt.zero_grad()
-        # NOTE log metrics
-        _metrics_d: dict[str, float] = {
-            "temperature": _temperature,
-            "cost": th.mean(_bcosts).item(),
-            "uniqueness_loss": _bunq_loss.item(),
-            "loss": _bloss.item(),
-            "gd-update": int(_to_update),
-        }
-        pbar.set_postfix({"loss": _bloss.item()})
+                _bbrwds: th.Tensor = -_bbcels - lmbda * th.sum(_bbacts, dim=1)
+                return _bbrwds
+
+            with th.autograd.graph.save_on_cpu():
+                _brwds_l = [
+                    _minibatch_compute_oracle_rwd(_bbidxs)
+                    for _bbidxs in th.split(
+                        th.cartesian_prod(th.arange(_bsz), th.arange(n_tmpls)),
+                        bsz_compute_oracle,
+                    )
+                ]
+            # (_bsz, n_tmpls)
+            _brwds: th.Tensor = th.unflatten(
+                th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_tmpls)
+            )
+            # NOTE compute costs
+            # (_bsz, n_tmpls)
+            _bweights: th.Tensor = th.distributions.RelaxedOneHotCategorical(
+                temperature=th.tensor(_temperature, device=plf.device), logits=_brwds
+            ).rsample()
+            # (_bsz, )
+            _bcosts: th.Tensor = th.mean(-_brwds * _bweights, dim=1)
+            _bunq_loss: th.Tensor = compute_uniqueness_penalty_fn(ltmpls)
+            # compute penalties
+            # TODO encourage sparsity, encourage pairwise independence
+            # compute loss
+            _bloss: th.Tensor = th.mean(_bcosts) + alpha_unq * _bunq_loss
+            # back prop but not update
+            _bloss.backward()
+            # NOTE log metrics
+            _metrics_d: dict[str, float] = {
+                "temperature": _temperature,
+                "cost": th.mean(_bcosts).item(),
+                "uniqueness_loss": _bunq_loss.item(),
+                "loss": _bloss.item(),
+                "gd-update": 0,
+            }
+            pbar.set_postfix({"loss": _bloss.item()})
+            plf.log_dict(
+                mylib.utils.add_prefix_to_dict(_metrics_d, "minibatch-gradient"),
+                step=_step,
+            )
+            _step = _step + 1
+        opt.step()
+        opt.zero_grad()
         plf.log_dict(
-            mylib.utils.add_prefix_to_dict(_metrics_d, "direct-gradient"), step=_itr
+            mylib.utils.add_prefix_to_dict(
+                {"gd-update": 1},
+                "minibatch-gradient",
+            ),
+            step=_step,
         )
         # NOTE keep track of validation set rollout performance
         if vdata is not None and _itr % eval_every_n_iter == 0:
@@ -333,9 +332,9 @@ init_fidx: int = 35
 n_tmpls: int = 128
 lr: float = 1e-1
 lmbda: float = 0.075
-n_iter: int = 10_000
-# n_iter_gradient_accumulate: int | None = 50
-n_iter_gradient_accumulate: int | None = None
+n_iter: int = 4096
+# # n_iter_gradient_accumulate: int | None = 50
+# n_iter_gradient_accumulate: int | None = None
 n_neighs = 100
 alpha_unq: float = 0.1
 min_features: int = 1
@@ -401,7 +400,7 @@ metrics_func = thm.MetricCollection(
 
 # %%
 # configure logger and ckpt path
-output_dir: str = os.path.join("outputs", "run", data_name, "direct-gradient")
+output_dir: str = os.path.join("outputs", "run", data_name, "minibatch-gradient")
 os.makedirs(output_dir, exist_ok=True)
 tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="")
 csv_logger = plf_loggers.CSVLogger(root_dir=tfb_logger.log_dir, name="", version="")
@@ -433,7 +432,7 @@ if init_fidx is None:
     )
 
 # %%
-tmpls: th.Tensor = make_templates_direct_gradient(
+tmpls: th.Tensor = make_templates_minibatch_gradient(
     tdata=tdata,
     classifier=tclassifier,
     tmpls_pt=tmpls_pt,
@@ -443,9 +442,9 @@ tmpls: th.Tensor = make_templates_direct_gradient(
     lmbda=lmbda,
     make_opt_fn=lambda _p: th.optim.Adam(_p, lr=lr),
     n_iter=n_iter,
-    n_iter_gradient_accumulate=n_iter_gradient_accumulate,
+    # n_iter_gradient_accumulate=n_iter_gradient_accumulate,
     bsz=bsz,
-    bsz_compute_minibatch_cost=bsz,
+    bsz_compute_oracle=bsz,
     get_temperature_fn=simple_exponential_decay_temperature,
     alpha_unq=alpha_unq,
     compute_uniqueness_penalty_fn=collision_probability_penalty,
@@ -454,11 +453,7 @@ tmpls: th.Tensor = make_templates_direct_gradient(
     vdata=vdata,
     vclassifier=vclassifier,
     metrics_func=metrics_func,
-    eval_every_n_iter=(
-        n_iter_gradient_accumulate
-        if n_iter_gradient_accumulate is not None and n_iter_gradient_accumulate > 0
-        else 1
-    ),
+    eval_every_n_iter=10,
     ckpt_p=ckpt_p,
 )
 
