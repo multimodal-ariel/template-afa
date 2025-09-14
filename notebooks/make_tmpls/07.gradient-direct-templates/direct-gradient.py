@@ -290,7 +290,9 @@ def make_templates_direct_gradient(
         if ckpt_p is not None:
             th.save(ltmpls, os.path.join(ckpt_p, f"ltmpls_itr{_itr}.pt"))
     pbar.close()
-    tmpls: th.Tensor = th.sigmoid(ltmpls).to(dtype=th.int64, device="cpu")
+    tmpls: th.Tensor = th.where(th.sigmoid(ltmpls) < 0.5, 0.0, 1.0).to(
+        dtype=th.int64, device="cpu"
+    )
     return tmpls
 
 
