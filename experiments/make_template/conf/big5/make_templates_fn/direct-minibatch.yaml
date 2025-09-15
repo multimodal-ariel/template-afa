@@ -1,0 +1,22 @@
+_target_: tafalib.makers.templates.make_templates_direct_minibatch_gradient
+tmpls_pt: null
+n_tmpls: 128
+max_features: null
+make_opt_fn:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-1
+n_iter: 4096
+bsz_compute_oracle: 81920
+alpha_unq: 1.0
+get_temperature_fn:
+  _target_: tafalib.makers.templates.simple_exponential_decay_temperature
+  _partial_: true
+  decay_every_n_iter: 10
+  init_temperature: 1.0
+  rate: 9e-1
+  min_temperature: 1e-10
+compute_uniqueness_penalty_fn:
+  _target_: tafalib.makers.templates.collision_probability_penalty
+  _partial_: true
+eval_every_n_iter: 10
