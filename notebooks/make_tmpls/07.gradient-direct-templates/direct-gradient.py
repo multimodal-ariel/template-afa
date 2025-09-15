@@ -151,10 +151,12 @@ def make_templates_direct_gradient(
     n_covs: int = tdata["xs"].shape[1]
     max_features = n_covs if max_features is None else max_features
     # initialize templates in logit space
-    ltmpls: th.Tensor = (
+    # init_fidx-th column shall not be updated by gradient descent
+    # (n_tmpls, n_covs)
+    ltmpls_o: th.Tensor = (
         th.nn.init.orthogonal_(
             th.empty(
-                (n_tmpls, n_covs),
+                (n_tmpls, n_covs - 1),
                 dtype=th.float32,
                 device=plf.device,
             )
@@ -162,16 +164,26 @@ def make_templates_direct_gradient(
         if tmpls_pt is None
         else torch.distributions.utils.probs_to_logits(
             th.clamp(tmpls_pt, 0.3, 0.7), is_binary=True
-        ).to(device=plf.device)
+        )[:, [_i for _i in range(n_covs) if _i != init_fidx]].to(device=plf.device)
     )
-    ltmpls[:, init_fidx] = th.max(ltmpls)
-    ltmpls = ltmpls.requires_grad_(True)
+    ltmpls_o = ltmpls_o.requires_grad_(True)
+    EPS_TRUE_PROB: th.Tensor = torch.distributions.utils.probs_to_logits(
+        th.tensor(9.9999999999e-1, dtype=th.float32, device=plf.device), is_binary=True
+    )
+    get_ltmpls_fn: Callable[[], th.Tensor] = lambda: th.cat(  # noqa: E731
+        (
+            ltmpls_o[:, :init_fidx],
+            EPS_TRUE_PROB[None, None].expand(n_tmpls, 1),
+            ltmpls_o[:, init_fidx:],
+        ),
+        dim=1,
+    )
     # make optimizer
-    opt: th.optim.Optimizer = make_opt_fn([ltmpls])
+    opt: th.optim.Optimizer = make_opt_fn([ltmpls_o])
     opt.zero_grad()
     # direct greedy optimize
     if tmpls_pt is not None:
-        assert n_tmpls == len(ltmpls)
+        assert n_tmpls == len(ltmpls_o)
     pbar = tqdm.trange(n_iter, desc="direct-gradient", leave=False, dynamic_ncols=True)
     for _itr in pbar:
         _temperature: float = get_temperature_fn(_itr)
@@ -194,8 +206,9 @@ def make_templates_direct_gradient(
         _btys: th.Tensor = _btdata["ys"]
         # NOTE draw a random sample from loogit template
         # TODO anneal temperature as it iterates
+        _ltmpls: th.Tensor = get_ltmpls_fn()
         _btmpls: th.Tensor = th.distributions.RelaxedBernoulli(
-            temperature=th.tensor(_temperature, device=plf.device), logits=ltmpls
+            temperature=th.tensor(_temperature, device=plf.device), logits=_ltmpls
         ).rsample()
 
         # NOTE compute cross entropy loss for each instance and template combination
@@ -235,7 +248,7 @@ def make_templates_direct_gradient(
         ).rsample()
         # (_bsz, )
         _bcosts: th.Tensor = th.mean(-_brwds * _bweights, dim=1)
-        _bunq_loss: th.Tensor = compute_uniqueness_penalty_fn(ltmpls)
+        _bunq_loss: th.Tensor = compute_uniqueness_penalty_fn(_ltmpls)
         # compute penalties
         # TODO encourage sparsity, encourage pairwise independence
         # compute loss
@@ -262,9 +275,9 @@ def make_templates_direct_gradient(
         )
         # NOTE keep track of validation set rollout performance
         if vdata is not None and _itr % eval_every_n_iter == 0:
-            _tmpls: th.Tensor = th.where(th.sigmoid(ltmpls) < 0.5, 0.0, 1.0).to(
-                device="cpu"
-            )
+            _tmpls: th.Tensor = th.where(
+                th.sigmoid(get_ltmpls_fn()) < 0.5, 0.0, 1.0
+            ).to(device="cpu")
             _tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
                 _tmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz, plf=plf
             )
@@ -288,9 +301,9 @@ def make_templates_direct_gradient(
             )
             plf.log_dict(mylib.utils.add_prefix_to_dict(_vmetrics_d, "val"), step=_itr)
         if ckpt_p is not None:
-            th.save(ltmpls, os.path.join(ckpt_p, f"ltmpls_itr{_itr}.pt"))
+            th.save(get_ltmpls_fn(), os.path.join(ckpt_p, f"ltmpls_itr{_itr}.pt"))
     pbar.close()
-    tmpls: th.Tensor = th.where(th.sigmoid(ltmpls) < 0.5, 0.0, 1.0).to(
+    tmpls: th.Tensor = th.where(th.sigmoid(get_ltmpls_fn()) < 0.5, 0.0, 1.0).to(
         dtype=th.int64, device="cpu"
     )
     return tmpls
