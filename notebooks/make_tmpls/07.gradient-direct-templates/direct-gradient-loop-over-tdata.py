@@ -105,7 +105,7 @@ def expected_hamming_penalty(ltmpls: th.Tensor) -> th.Tensor:
 
 
 # %%
-def make_templates_minibatch_gradient(
+def make_templates_direct_minibatch_gradient(
     tdata: thd.TensorDict,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     tmpls_pt: Optional[th.Tensor],
