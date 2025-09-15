@@ -93,6 +93,7 @@ def main(cfg: MainConf):
     _mktmpl_fn_kwargs: dict[str, Any] = dict()
     if str.split(cfg.make_templates_fn._target_, ".")[-1] in (
         "make_templates_direct_greedy_with_undo",
+        "make_templates_direct_minibatch_gradient",
     ):
         _mktmpl_fn_kwargs.update(
             {
