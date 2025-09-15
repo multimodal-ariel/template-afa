@@ -13,6 +13,7 @@ import scipy.spatial as sp_spatial
 import tensordict as thd
 import torch as th
 import torch.distributions.utils
+import torch.utils.data as th_data
 import torchmetrics as thm
 import tqdm.auto as tqdm
 
@@ -1344,6 +1345,280 @@ def make_templates_direct_greedy_with_undo(
         if ckpt_p is not None:
             th.save(tmpls, os.path.join(ckpt_p, f"tmpls_itr{_itr}.pt"))
     pbar.close()
+    return tmpls
+
+
+# NOTE temperature function for direct gradient method
+def simple_exponential_decay_temperature(
+    itr: int,
+    decay_every_n_iter=100,
+    init_temperature=1.0,
+    rate=9e-1,
+    min_temperature: float = 1e-7,
+) -> float:
+    num_steps = itr // decay_every_n_iter
+    temperature: float = init_temperature * (rate**num_steps)
+    if temperature < min_temperature:
+        temperature = min_temperature
+    return temperature
+
+
+# NOTE uniqueness penalty cost function
+def collision_probability_penalty(ltmpls: th.Tensor) -> th.Tensor:
+    """
+    Penalize the probability that two rows will be identical in discrete space.
+
+    Args:
+        logits: (M, D) tensor of logits
+        lambda_reg: penalty strength
+
+    Mathematical intuition:
+    - For binary variables, P(bit_i == bit_j) = p_i * p_j + (1-p_i) * (1-p_j)
+    - For entire rows to be identical, ALL bits must match
+    - P(row_i == row_j) = ∏_d P(bit_i[d] == bit_j[d])
+    """
+    P = th.sigmoid(ltmpls)  # Convert logits to probabilities [0,1]
+    M, D = P.shape
+    # Expand dimensions for broadcasting
+    # P_i: (M, 1, D) - each row i broadcast across dimension 1
+    # P_j: (1, M, D) - each row j broadcast across dimension 0
+    P_i = P.unsqueeze(1)  # Shape: (M, 1, D)
+    P_j = P.unsqueeze(0)  # Shape: (1, M, D)
+    # For each pair (i,j) and each dimension d:
+    # P(bit_i[d] == bit_j[d]) = P_i[d] * P_j[d] + (1-P_i[d]) * (1-P_j[d])
+    same_bit_prob = P_i * P_j + (1 - P_i) * (1 - P_j)
+    # Shape: (M, M, D)
+    # P(row_i == row_j) = ∏_d P(bit_i[d] == bit_j[d])
+    # In log space: log(∏) = ∑log, then exp back
+    # But torch.prod works directly on small probabilities
+    collision_prob = th.prod(same_bit_prob, dim=-1)  # Shape: (M, M)
+    # Remove diagonal (self-comparisons) and avoid double-counting
+    # Upper triangular mask excludes diagonal and lower triangle
+    mask = th.triu(th.ones(M, M, device=ltmpls.device), diagonal=1)
+    return th.sum(collision_prob * mask)
+
+
+def expected_hamming_penalty(ltmpls: th.Tensor) -> th.Tensor:
+    """
+    Maximize expected Hamming distance between all pairs of rows.
+
+    Mathematical intuition:
+    - Hamming distance = number of differing bits
+    - E[HD(row_i, row_j)] = ∑_d P(bit_i[d] ≠ bit_j[d])
+    - P(bit_i[d] ≠ bit_j[d]) = p_i*(1-p_j) + (1-p_i)*p_j
+    """
+    P = th.sigmoid(ltmpls)
+    M, D = P.shape
+    P_i = P.unsqueeze(1)  # (M, 1, D)
+    P_j = P.unsqueeze(0)  # (1, M, D)
+    # P(bit differs) = P_i * (1-P_j) + (1-P_i) * P_j
+    # This is the probability that bit i is 1 and bit j is 0, OR
+    # bit i is 0 and bit j is 1
+    diff_bit_prob = P_i * (1 - P_j) + (1 - P_i) * P_j
+    # Shape: (M, M, D)
+    # Expected Hamming distance = sum over all dimensions
+    expected_hamming = th.sum(diff_bit_prob, dim=-1)  # Shape: (M, M)
+    # We want to MAXIMIZE Hamming distance, so negative penalty
+    mask = th.triu(th.ones(M, M, device=ltmpls.device), diagonal=1)
+    # Negative because we want to maximize distance (minimize negative distance)
+    return -th.sum(expected_hamming * mask)
+
+
+def make_templates_direct_minibatch_gradient(
+    tdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    tmpls_pt: Optional[th.Tensor],
+    init_fidx: int,
+    n_tmpls: int,
+    max_features: Optional[int],
+    lmbda: float,
+    make_opt_fn: Callable[[Iterable[th.Tensor]], th.optim.Optimizer],
+    n_iter: int,
+    bsz: int,
+    bsz_compute_oracle: int,
+    alpha_unq: float,
+    get_temperature_fn: Callable[[int], float],
+    compute_uniqueness_penalty_fn: Callable[[th.Tensor], th.Tensor],
+    plf: pl.Fabric,
+    n_neighs: int,
+    vdata: Optional[thd.TensorDict],
+    vclassifier: Optional[mymodels.classifiers.SubsetFeatureClassifier],
+    metrics_func: thm.MetricCollection,
+    eval_every_n_iter: int,
+    ckpt_p: Optional[str] = None,
+    generator: Optional[th.Generator] = None,
+) -> th.Tensor:
+    # initialize
+    assert isinstance(
+        classifier, mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier
+    )
+    generator = th.default_generator if generator is None else generator
+    vclassifier = classifier if vclassifier is None else vclassifier
+    assert isinstance(
+        vclassifier, mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier
+    )
+    if ckpt_p is not None:
+        os.makedirs(ckpt_p, exist_ok=True)
+    classifier = classifier.eval().to(device=plf.device)
+    vclassifier = vclassifier.eval().to(device=plf.device)
+    tloader = th_data.DataLoader(
+        tdata, batch_size=bsz, collate_fn=lambda x: x  # type:ignore
+    )
+    # record shapes
+    n_covs: int = tdata["xs"].shape[1]
+    max_features = n_covs if max_features is None else max_features
+    # initialize templates in logit space
+    # init_fidx-th column shall not be updated by gradient descent
+    # (n_tmpls, n_covs)
+    ltmpls_o: th.Tensor = (
+        th.nn.init.orthogonal_(
+            th.empty(
+                (n_tmpls, n_covs - 1),
+                dtype=th.float32,
+                device=plf.device,
+            )
+        )
+        if tmpls_pt is None
+        else torch.distributions.utils.probs_to_logits(
+            th.clamp(tmpls_pt, 0.3, 0.7), is_binary=True
+        )[:, [_i for _i in range(n_covs) if _i != init_fidx]].to(device=plf.device)
+    )
+    ltmpls_o = ltmpls_o.requires_grad_(True)
+    EPS_TRUE_PROB: th.Tensor = torch.distributions.utils.probs_to_logits(
+        th.tensor(9.9999999999e-1, dtype=th.float32, device=plf.device), is_binary=True
+    )
+    get_ltmpls_fn: Callable[[], th.Tensor] = lambda: th.cat(  # noqa: E731
+        (
+            ltmpls_o[:, :init_fidx],
+            EPS_TRUE_PROB[None, None].expand(n_tmpls, 1),
+            ltmpls_o[:, init_fidx:],
+        ),
+        dim=1,
+    )
+    # make optimizer
+    opt: th.optim.Optimizer = make_opt_fn([ltmpls_o])
+    opt.zero_grad()
+    # direct greedy optimize
+    if tmpls_pt is not None:
+        assert n_tmpls == len(ltmpls_o)
+    pbar = tqdm.trange(n_iter, desc="direct-gradient", leave=False, dynamic_ncols=True)
+    _step: int = 0
+    for _itr in pbar:
+        _temperature: float = get_temperature_fn(_itr)
+        for _btdata in tloader:
+            _btdata: thd.TensorDict
+            _bsz: int = len(_btdata)
+            # (_btdata, n_covs)
+            _btxs: th.Tensor = _btdata["xs"]
+            # (_btdata, )
+            _btys: th.Tensor = _btdata["ys"]
+            #
+            _ltmpls: th.Tensor = get_ltmpls_fn()
+            # NOTE draw a random sample from loogit template
+            _btmpls: th.Tensor = th.distributions.RelaxedBernoulli(
+                temperature=th.tensor(_temperature, device=plf.device), logits=_ltmpls
+            ).rsample()
+
+            # NOTE compute cross entropy loss for each instance and template combination
+            _brwds_l: list[th.Tensor]
+
+            def _minibatch_compute_oracle_rwd(_bbidxs: th.Tensor) -> th.Tensor:
+                # (_bsz, n_covs)
+                _bbctxs: th.Tensor = _btxs[_bbidxs[:, 0], :].to(device=plf.device)
+                _bbacts: th.Tensor = _btmpls[_bbidxs[:, 1], :].to(device=plf.device)
+                # (_bsz, n_labels)
+                _bbpyhats: th.Tensor = classifier.predict_proba(_bbctxs, _bbacts)
+                # (_bsz, )
+                _bbcels: th.Tensor = th.nn.functional.cross_entropy(
+                    _bbpyhats,
+                    _btys[_bbidxs[:, 0]].to(device=plf.device),
+                    reduction="none",
+                )
+                _bbrwds: th.Tensor = -_bbcels - lmbda * th.sum(_bbacts, dim=1)
+                return _bbrwds
+
+            with th.autograd.graph.save_on_cpu():
+                _brwds_l = [
+                    _minibatch_compute_oracle_rwd(_bbidxs)
+                    for _bbidxs in th.split(
+                        th.cartesian_prod(th.arange(_bsz), th.arange(n_tmpls)),
+                        bsz_compute_oracle,
+                    )
+                ]
+            # (_bsz, n_tmpls)
+            _brwds: th.Tensor = th.unflatten(
+                th.cat(_brwds_l, dim=0), dim=0, sizes=(_bsz, n_tmpls)
+            )
+            # NOTE compute costs
+            # (_bsz, n_tmpls)
+            _bweights: th.Tensor = th.distributions.RelaxedOneHotCategorical(
+                temperature=th.tensor(_temperature, device=plf.device), logits=_brwds
+            ).rsample()
+            # (_bsz, )
+            _bcosts: th.Tensor = th.mean(-_brwds * _bweights, dim=1)
+            _bunq_loss: th.Tensor = compute_uniqueness_penalty_fn(_ltmpls)
+            # compute penalties
+            # TODO encourage sparsity, encourage pairwise independence
+            # compute loss
+            _bloss: th.Tensor = th.mean(_bcosts) + alpha_unq * _bunq_loss
+            # back prop but not update
+            _bloss.backward()
+            # NOTE log metrics
+            _metrics_d: dict[str, float] = {
+                "temperature": _temperature,
+                "cost": th.mean(_bcosts).item(),
+                "uniqueness_loss": _bunq_loss.item(),
+                "loss": _bloss.item(),
+                "gd-update": 0,
+            }
+            pbar.set_postfix({"loss": _bloss.item()})
+            plf.log_dict(
+                mylib.utils.add_prefix_to_dict(_metrics_d, "minibatch-gradient"),
+                step=_step,
+            )
+            _step = _step + 1
+        opt.step()
+        opt.zero_grad()
+        plf.log_dict(
+            mylib.utils.add_prefix_to_dict(
+                {"gd-update": 1},
+                "minibatch-gradient",
+            ),
+            step=_step,
+        )
+        # NOTE keep track of validation set rollout performance
+        if vdata is not None and _itr % eval_every_n_iter == 0:
+            _tmpls: th.Tensor = th.where(
+                th.sigmoid(get_ltmpls_fn()) < 0.5, 0.0, 1.0
+            ).to(device="cpu")
+            _tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+                _tmpls, data=tdata, classifier=classifier, lmbda=lmbda, bsz=bsz, plf=plf
+            )
+            _vmetrics_d: dict[str, float] = tafalib_utils.evaluate(
+                data=vdata,
+                classifier=vclassifier,
+                cost_est=lambda x: tafalib_functional.knn_cost_est(
+                    x,
+                    lmbda=lmbda,
+                    txs=tdata["xs"],
+                    tcels=_tpcomp["cels"],
+                    tmpls=_tmpls,
+                    n_neighs=n_neighs,
+                    p=2,
+                ),
+                init_fidx=init_fidx,
+                tmpls=_tmpls,
+                lmbda=lmbda,
+                metrics_func=metrics_func,
+                plf=plf,
+            )
+            plf.log_dict(mylib.utils.add_prefix_to_dict(_vmetrics_d, "val"), step=_itr)
+        if ckpt_p is not None:
+            th.save(get_ltmpls_fn(), os.path.join(ckpt_p, f"ltmpls_itr{_itr}.pt"))
+    pbar.close()
+    tmpls: th.Tensor = th.where(th.sigmoid(get_ltmpls_fn()) < 0.5, 0.0, 1.0).to(
+        dtype=th.int64, device="cpu"
+    )
     return tmpls
 
 
