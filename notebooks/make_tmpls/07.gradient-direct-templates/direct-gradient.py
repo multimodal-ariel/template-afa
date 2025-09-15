@@ -448,7 +448,7 @@ tmpls: th.Tensor = make_templates_direct_gradient(
     n_iter_gradient_accumulate=n_iter_gradient_accumulate,
     bsz=bsz,
     bsz_compute_oracle=bsz,
-    get_temperature_fn=simple_exponential_decay_temperature,
+    get_temperature_fn=partial(simple_exponential_decay_temperature, rate=9.99e-1),
     alpha_unq=alpha_unq,
     compute_uniqueness_penalty_fn=collision_probability_penalty,
     plf=plf,
