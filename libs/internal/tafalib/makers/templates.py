@@ -1098,6 +1098,7 @@ def make_templates_direct_greedy_with_undo(
     n_iter: int,
     bsz: int,
     plf: pl.Fabric,
+    max_tdata: Optional[int] = None,
     tmpls_pt: Optional[th.Tensor] = None,
     eval_every_n_iter: int = 1,
     n_neighs: Optional[int] = None,
@@ -1141,6 +1142,8 @@ def make_templates_direct_greedy_with_undo(
         n_iter (int): Maximum number of optimization iterations to perform.
         bsz (int): Batch size for processing template evaluations.
         plf (pl.Fabric): PyTorch Lightning Fabric instance for device management and logging.
+        max_tdata (Optional[int]): optional maximum training data to subsample if training data
+          is too large and takes too long to complete. Defaults to None.
         tmpls_pt (Optional[th.Tensor]): Pre-trained templates to initialize from. If None,
             starts with blank templates. Shape: (n_tmpls, n_covs). Defaults to None.
         eval_every_n_iter (int): Frequency of validation evaluation (every N iterations).
@@ -1220,13 +1223,22 @@ def make_templates_direct_greedy_with_undo(
     # direct greedy optimize
     pbar = tqdm.trange(n_iter, desc="direct-greedy", leave=False, dynamic_ncols=True)
     for _itr in pbar:
+        _tdata: thd.TensorDict = (
+            tdata
+            if max_tdata is None or len(tdata) <= max_tdata
+            else tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)), num_samples=max_tdata, replacement=False
+                )
+            ]
+        )
         # NOTE compute tpcomp for previous round of tmpls
         # (_ntmpls_prv, ncovs)
         _tmpls_prv: th.Tensor = tmpls[0 : _nxt_blk_idx + 1]
         # (ntdata, )
         _tpcomps_prv: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
             tmpls=_tmpls_prv,
-            data=tdata,
+            data=_tdata,
             classifier=classifier,
             lmbda=lmbda,
             bsz=bsz,
@@ -1278,7 +1290,7 @@ def make_templates_direct_greedy_with_undo(
         # (ntdata, )
         _ctpcomps_flt: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
             tmpls=_ctmpls_flt,
-            data=tdata,
+            data=_tdata,
             classifier=classifier,
             lmbda=lmbda,
             bsz=bsz,
@@ -1329,7 +1341,7 @@ def make_templates_direct_greedy_with_undo(
                 cost_est=lambda x: tafalib_functional.knn_cost_est(
                     x,
                     lmbda=lmbda,
-                    txs=tdata["xs"],
+                    txs=_tdata["xs"],
                     tcels=_ctcels,
                     tmpls=_ctmpls_l[_slctd],
                     n_neighs=n_neighs,
