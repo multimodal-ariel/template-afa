@@ -84,10 +84,6 @@ def main(cfg: MainConf):
             "auroc": thm.AUROC(task="multiclass", num_classes=n_labels),
         }
     )
-    # make templates
-    make_templates_fn: Callable = hd.utils.instantiate(
-        cfg.make_templates_fn, _partial_=True
-    )
     # add eval validation envirionment kwags
     # TODO modify tafalib.makers.templates direclty to provide common interface
     _mktmpl_fn_kwargs: dict[str, Any] = dict()
@@ -109,8 +105,8 @@ def main(cfg: MainConf):
         _mktmpl_fn_kwargs.update(
             {
                 "feature_opt_cycler": hd.utils.instantiate(
-                    cfg.make_templates_fn.feature_opt_cycler, tdata=tdata
-                ),
+                    cfg.make_templates_fn.feature_opt_cycler, _partial_=True
+                )(tdata=tdata),
                 "n_neighs": cfg.n_neighs,
                 "vdata": vdata,
                 "vclassifier": vclassifier,
@@ -118,6 +114,10 @@ def main(cfg: MainConf):
             }
         )
         del cfg.make_templates_fn.feature_opt_cycler
+    # make templates
+    make_templates_fn: Callable = hd.utils.instantiate(
+        cfg.make_templates_fn, _partial_=True
+    )
     tmpls: th.Tensor = make_templates_fn(
         tdata=tdata,
         classifier=tclassifier,
