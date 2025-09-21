@@ -103,6 +103,21 @@ def main(cfg: MainConf):
                 "metrics_func": metrics_func,
             }
         )
+    elif str.split(cfg.make_templates_fn._target_, ".")[-1] in (
+        "make_templates_cyclic_greedy_with_undo",
+    ):
+        _mktmpl_fn_kwargs.update(
+            {
+                "feature_opt_cycler": hd.utils.instantiate(
+                    cfg.make_templates_fn.feature_opt_cycler, tdata=tdata
+                ),
+                "n_neighs": cfg.n_neighs,
+                "vdata": vdata,
+                "vclassifier": vclassifier,
+                "metrics_func": metrics_func,
+            }
+        )
+        del cfg.make_templates_fn.feature_opt_cycler
     tmpls: th.Tensor = make_templates_fn(
         tdata=tdata,
         classifier=tclassifier,
