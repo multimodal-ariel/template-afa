@@ -1667,7 +1667,7 @@ def make_templates_cyclic_greedy_with_undo(
         # (_ntmpls_prv, ncovs)
         _tmpls_prv: th.Tensor = tmpls[0 : _nxt_blk_idx + 1]
         # (ntdata, )
-        _tpcomps_prv: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+        _tpcomps_prv: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
             tmpls=_tmpls_prv,
             data=_tdata,
             classifier=classifier,
@@ -1719,7 +1719,7 @@ def make_templates_cyclic_greedy_with_undo(
         _inv_idxs_l: tuple[th.Tensor, ...] = th.split(_inv_idxs, _ctmpls_lens_l)
         # NOTE compute rewards
         # (ntdata, )
-        _ctpcomps_flt: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+        _ctpcomps_flt: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
             tmpls=_ctmpls_flt,
             data=_tdata,
             classifier=classifier,
@@ -1766,10 +1766,10 @@ def make_templates_cyclic_greedy_with_undo(
         ):
             # (ntdata, _ncands)
             _ctcels: th.Tensor = _ctpcomps_flt["cels"][:, _inv_idxs_l[_slctd]]
-            _vmetrics_d: dict[str, float] = tafalib.utils.evaluate(
+            _vmetrics_d: dict[str, float] = tafalib_utils.evaluate(
                 data=vdata,
                 classifier=vclassifier,
-                cost_est=lambda x: tafalib.functional.knn_cost_est(
+                cost_est=lambda x: tafalib_functional.knn_cost_est(
                     x,
                     lmbda=lmbda,
                     txs=_tdata["xs"],
