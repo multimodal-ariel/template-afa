@@ -1,0 +1,7 @@
+_target_: tafalib.makers.templates.make_templates_cyclic_greedy_with_undo
+n_tmpls: 128
+max_features: null
+n_iter: 4096
+feature_opt_cycler:
+  _target_: tafalib.makers.templates.simple_cycle
+  block_size: 16
