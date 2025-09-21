@@ -4,7 +4,7 @@ import copy
 import itertools as itrtls
 import math
 import os
-from typing import Callable, Iterable, Optional
+from typing import Callable, Generator, Iterable, Optional
 
 import lightning as pl
 import mylib
@@ -1434,6 +1434,361 @@ def expected_hamming_penalty(ltmpls: th.Tensor) -> th.Tensor:
     mask = th.triu(th.ones(M, M, device=ltmpls.device), diagonal=1)
     # Negative because we want to maximize distance (minimize negative distance)
     return -th.sum(expected_hamming * mask)
+
+
+def simple_cycle(tdata: thd.TensorDict, block_size: int) -> Generator[tuple[int, ...]]:
+    """
+    Generate a simple block-based feature cycling pattern for cyclic greedy optimization.
+
+    This function creates a generator that infinitely cycles through blocks of feature indices,
+    designed to be used as the feature_opt_cycler parameter in make_templates_cyclic_greedy_with_undo.
+    It divides all available features into equally-sized blocks and yields each block in sequence,
+    repeating the pattern indefinitely.
+
+    The cycling pattern helps control the computational complexity of the cyclic greedy algorithm
+    by limiting the number of features considered at each iteration, while ensuring all features
+    are eventually considered through the cycling process.
+
+    Args:
+        tdata (thd.TensorDict): Training data containing feature information. Used to determine
+            the total number of features (n_covs) from the shape of tdata["xs"].
+        block_size (int): Number of features to include in each cycle block. Features are
+            grouped into blocks of this size. The last block may contain fewer features
+            if the total number of features is not evenly divisible by block_size.
+
+    Yields:
+        tuple[int, ...]: A tuple containing feature indices for the current cycle block.
+            The generator cycles through all blocks infinitely, restarting from the first
+            block after the last block is yielded.
+
+    Example:
+        ```python
+        # For data with 10 features and block_size=3:
+        # Will create blocks: (0,1,2), (3,4,5), (6,7,8), (9,)
+        # Then cycle: (0,1,2) -> (3,4,5) -> (6,7,8) -> (9,) -> (0,1,2) -> ...
+
+        cycler = simple_cycle(tdata, block_size=3)
+
+        # Use with cyclic greedy optimization
+        templates = make_templates_cyclic_greedy_with_undo(
+            tdata=tdata,
+            classifier=classifier,
+            init_fidx=0,
+            n_tmpls=5,
+            max_features=10,
+            lmbda=0.1,
+            feature_opt_cycler=cycler,  # Use the block-based cycler
+            n_iter=100,
+            bsz=32,
+            plf=fabric
+        )
+        ```
+
+    Notes:
+        - The generator is infinite - it will continue cycling through blocks indefinitely.
+        - Block size should be chosen based on computational constraints and desired granularity:
+        * Smaller blocks: More focused optimization, potentially slower convergence
+        * Larger blocks: Less focused optimization, faster per-iteration processing
+        - Features are grouped sequentially (0,1,2...), but you can create custom cycling
+        patterns by implementing alternative generators.
+        - The last block may be smaller than block_size if n_covs is not evenly divisible.
+    """
+    n_covs: int = tdata["xs"].shape[1]
+    cycles: list[tuple[int, ...]] = [
+        tuple(_curr_pos.tolist())
+        for _curr_pos in th.split(th.arange(0, n_covs, dtype=th.long), block_size)
+    ]
+    for _curr_pos in itrtls.cycle(cycles):
+        yield _curr_pos
+
+
+@th.no_grad()
+def make_templates_cyclic_greedy_with_undo(
+    tdata: thd.TensorDict,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    init_fidx: int,
+    n_tmpls: int,
+    max_features: Optional[int],
+    lmbda: float,
+    feature_opt_cycler: Generator[tuple[int, ...]],
+    n_iter: int,
+    bsz: int,
+    plf: pl.Fabric,
+    max_tdata: Optional[int] = None,
+    tmpls_pt: Optional[th.Tensor] = None,
+    eval_every_n_iter: int = 1,
+    n_neighs: Optional[int] = None,
+    vdata: Optional[thd.TensorDict] = None,
+    vclassifier: Optional[mymodels.classifiers.SubsetFeatureClassifier] = None,
+    metrics_func: Optional[thm.MetricCollection] = None,
+    ckpt_p: Optional[str] = None,
+    generator: Optional[th.Generator] = None,
+) -> th.Tensor:
+    """
+    Cyclic greedy template optimization with undo capability.
+
+    This function implements a cyclic greedy algorithm for optimizing binary feature
+    templates with the ability to modify existing templates (the "undo" mechanism). Unlike
+    the direct greedy approach that considers all features simultaneously, this algorithm
+    cycles through predetermined subsets of features, making it more computationally
+    efficient and allowing for structured exploration of the feature space.
+
+    The algorithm iteratively improves a collection of binary feature templates by:
+    1. Starting with initialized templates (either from scratch or pre-trained)
+    2. Cycling through feature subsets provided by the feature_opt_cycler
+    3. For each template, generating candidate modifications by toggling features only
+    within the current cycle subset
+    4. Creating candidate template collections by combining modified templates with unchanged ones
+    5. Evaluating the fitness of each candidate collection using classifier rewards
+    6. Selecting the collection with the highest improvement in fitness
+    7. Optionally validating performance on a separate validation set
+
+    The "undo" capability allows the algorithm to remove previously selected features if doing so
+    improves the overall template collection performance, making it more adaptive than standard
+    greedy approaches. The cyclic nature provides structured optimization that can be more
+    efficient than exhaustive feature consideration.
+
+    Args:
+        tdata (thd.TensorDict): Training data containing 'xs' (features) and 'ys' (labels).
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): Classifier used to evaluate
+            template performance and compute rewards.
+        init_fidx (int): Index of the initial feature that must be included in all templates.
+            This feature cannot be toggled off.
+        n_tmpls (int): Target number of templates to optimize.
+        max_features (Optional[int]): Maximum number of features per template. If None,
+            uses the total number of features (n_covs).
+        lmbda (float): Regularization parameter that penalizes templates with more features.
+            Higher values encourage sparser templates.
+        feature_opt_cycler (Generator[tuple[int, ...]]): Generator that yields tuples of
+            feature indices to consider at each iteration. This controls which features
+            are eligible for toggling in each optimization cycle.
+        n_iter (int): Maximum number of optimization iterations to perform.
+        bsz (int): Batch size for processing template evaluations.
+        plf (pl.Fabric): PyTorch Lightning Fabric instance for device management and logging.
+        max_tdata (Optional[int]): Optional maximum training data to subsample if training data
+            is too large and takes too long to complete. Defaults to None.
+        tmpls_pt (Optional[th.Tensor]): Pre-trained templates to initialize from. If None,
+            starts with blank templates. Shape: (n_tmpls, n_covs). Defaults to None.
+        eval_every_n_iter (int): Frequency of validation evaluation (every N iterations).
+            Defaults to 1.
+        n_neighs (Optional[int]): Number of nearest neighbors to consider for validation cost
+            estimation. If None, validation evaluation is skipped. Defaults to None.
+        vdata (Optional[thd.TensorDict]): Validation data for periodic performance evaluation.
+            If None, no validation is performed. Defaults to None.
+        vclassifier (Optional[mymodels.classifiers.SubsetFeatureClassifier]): Classifier for
+            validation evaluation. If None, uses the training classifier. Defaults to None.
+        metrics_func (Optional[thm.MetricCollection]): Collection of metrics to compute during
+            validation. If None, validation evaluation is skipped. Defaults to None.
+        ckpt_p (Optional[str]): Directory path for saving checkpoints. If None, no checkpoints
+            are saved. Defaults to None.
+        generator (Optional[th.Generator]): Random number generator for reproducibility.
+            If None, uses the default generator. Defaults to None.
+
+    Returns:
+        th.Tensor: Optimized binary template matrix of shape (n_tmpls, n_covs), where each
+            row represents a template and each element is 0 or 1 indicating feature inclusion.
+
+    Algorithm Details:
+        - **Cyclic Optimization**: Only considers features from the current cycle subset rather
+        than all features simultaneously, reducing computational complexity.
+        - **Feature Toggling**: For each template, considers adding or removing each feature
+        within the current cycle (except the initial feature which is always included).
+        - **Collection-based Evaluation**: Evaluates entire template collections rather than
+        individual templates, accounting for redundancy and complementarity.
+        - **Adaptive Termination**: Stops early if no improvements can be found and the
+        target number of templates is reached.
+        - **Progressive Building**: Gradually builds up to the target number of templates,
+        allowing for incremental optimization.
+
+    Example:
+        ```python
+        # Create a cycler that considers features in blocks of 5
+        cycler = simple_cycle(tdata, block_size=5)
+
+        # Initialize with 3 templates, maximum 8 features each
+        templates = make_templates_cyclic_greedy_with_undo(
+            tdata=training_data,
+            classifier=my_classifier,
+            init_fidx=0,              # Always include feature 0
+            n_tmpls=3,
+            max_features=8,
+            lmbda=0.1,               # Light regularization
+            feature_opt_cycler=cycler, # Cycle through feature blocks
+            n_iter=50,
+            bsz=32,
+            plf=fabric,
+            tmpls_pt=None,           # Start from scratch
+            eval_every_n_iter=5,
+            n_neighs=3,
+            vdata=validation_data,
+            vclassifier=None,
+            metrics_func=metrics
+        )
+        ```
+
+    Notes:
+        - The function requires gradient computation to be disabled (@th.no_grad()).
+        - The feature_opt_cycler determines the optimization schedule - use simple_cycle()
+        for block-based cycling or implement custom cycling strategies.
+        - Validation evaluation uses k-nearest neighbors cost estimation.
+        - Progress is logged through the Lightning Fabric logging system.
+        - Checkpoints save the current template state at each iteration if enabled.
+        - The cyclic approach can be significantly faster than direct greedy when the
+        feature space is large.
+    """
+    generator = th.default_generator if generator is None else generator
+    vclassifier = classifier if vclassifier is None else vclassifier
+    if ckpt_p is not None:
+        os.makedirs(ckpt_p, exist_ok=True)
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    # initialize templates
+    tmpls: th.Tensor = (
+        th.zeros((n_tmpls, n_covs), dtype=th.long) if tmpls_pt is None else tmpls_pt
+    )
+    tmpls[:, init_fidx] = 1
+    if tmpls_pt is not None:
+        assert n_tmpls == len(tmpls)
+    # book keeping
+    _nxt_blk_idx: int = 0 if tmpls_pt is None else n_tmpls - 1
+    # cyclic greedy optimize
+    pbar = tqdm.trange(n_iter, desc="cyclic-greedy", leave=False, dynamic_ncols=True)
+    for _itr, _curr_cycle in zip(pbar, feature_opt_cycler):
+        _tdata: thd.TensorDict = (
+            tdata
+            if max_tdata is None or len(tdata) <= max_tdata
+            else tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)), num_samples=max_tdata, replacement=False
+                )
+            ]
+        )
+        # NOTE compute tpcomp for previous round of tmpls
+        # (_ntmpls_prv, ncovs)
+        _tmpls_prv: th.Tensor = tmpls[0 : _nxt_blk_idx + 1]
+        # (ntdata, )
+        _tpcomps_prv: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+            tmpls=_tmpls_prv,
+            data=_tdata,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )
+        # NOTE compute fitness of previous templates
+        # (ntdata, )
+        _rwds_prv: th.Tensor = th.max(_tpcomps_prv["rwds"], dim=1)[0]
+        # () fitness_prv is a scaler
+        _fitness_prv: th.Tensor = th.mean(_rwds_prv)
+        # NOTE make all possible future templates without duplication
+        _ntmpls: int = len(_tmpls_prv)
+        _uctmpls_inds: set[frozenset[tuple[int, ...]]] = set()
+        # for each template, generate "successor" collection of tmpls
+        for _tidx in range(_ntmpls):
+            # copy all templates except the one indexed by _tidx
+            _base_inds: set[tuple[int, ...]] = {
+                tuple(_t.tolist()) for _i, _t in enumerate(_tmpls_prv) if _i != _tidx
+            }
+            # given tidx-th template, for each possible location, toggle avaialability of one feature to tidx-th template
+            for _pos in [_i for _i in _curr_cycle if _i != init_fidx]:
+                _cinds: set[tuple[int, ...]] = copy.deepcopy(_base_inds)
+                _new_ind: th.Tensor = _tmpls_prv[_tidx].clone()
+                _new_ind[_pos] = 1 if _new_ind[_pos] == 0 else 0
+                if th.sum(_new_ind) > max_features:
+                    continue
+                _cinds.add(tuple(_new_ind.tolist()))
+                # filter out the case where the _new_ind is not something new to _base_inds
+                if len(_cinds) == len(_base_inds):
+                    continue
+                # add the complete next potential template collection back to _tctmpls_inds
+                _uctmpls_inds.add(frozenset(_cinds))
+        # NOTE make list of potential future templates
+        # a list of (_ncands, ) where each entry is (_ntmpls, )
+        _ctmpls_l: list[th.Tensor] = [th.tensor([*_inds]) for _inds in _uctmpls_inds]
+        # NOTE compute rewards
+        # make unique feature combinations
+        # keep track of all the information to recover the order
+        _ctmpls_lens_l: list[int] = list(map(len, _ctmpls_l))
+        _ctmpls_flt: th.Tensor
+        _inv_idxs: th.Tensor
+        _ctmpls_flt, _inv_idxs = th.unique(
+            th.cat(_ctmpls_l, dim=0), dim=0, return_inverse=True
+        )
+        # list of (_ncands, ) each entry being a tensor of indices to _ctmpls_flt
+        # the i-th entry of the list is the indices to which template is used to compose i-th candidate
+        _inv_idxs_l: tuple[th.Tensor, ...] = th.split(_inv_idxs, _ctmpls_lens_l)
+        # NOTE compute rewards
+        # (ntdata, )
+        _ctpcomps_flt: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+            tmpls=_ctmpls_flt,
+            data=_tdata,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )
+        # (ntdata, len(_ctmpls_flt))
+        _crwds_flt: th.Tensor = _ctpcomps_flt["rwds"]
+        # NOTE compute fitness
+        # (_ncands, )
+        _cfitness: th.Tensor = th.stack(
+            [th.mean(th.max(_crwds_flt[:, _idxs], dim=1)[0]) for _idxs in _inv_idxs_l]
+        )
+        # NOTE compute improvements
+        # (_ncands, )
+        _improvements: th.Tensor = _cfitness - _fitness_prv
+        _improvements = th.clamp(_improvements, min=0.0)
+        # NOTE terminate loop if no imiprovement is made
+        if not th.any(_improvements > 0.0) and _nxt_blk_idx + 1 >= n_tmpls:
+            break
+        # NOTE choose the one with the most improvement
+        _slctd: int = int(th.argmax(_improvements, dim=0).item())
+        tmpls[0 : _nxt_blk_idx + 1] = _ctmpls_l[_slctd]
+        # NOTE if the blank template is modified, increment _nxt_blk_idx
+        if th.all(th.sum(_ctmpls_l[_slctd], dim=1) != 1) and _nxt_blk_idx + 1 < n_tmpls:
+            _nxt_blk_idx = _nxt_blk_idx + 1
+        # NOTE log metrics
+        _metrics_d: dict[str, float] = {
+            "fitness": _cfitness[_slctd].item(),
+            "improvement": _improvements[_slctd].item(),
+        }
+        pbar.set_postfix(_metrics_d)
+        plf.log_dict(
+            mylib.utils.add_prefix_to_dict(_metrics_d, "make-templates"), step=_itr
+        )
+        # NOTE keep track of validation set rollout performance
+        if (
+            n_neighs is not None
+            and vdata is not None
+            and vclassifier is not None
+            and metrics_func is not None
+            and _itr % eval_every_n_iter == 0
+        ):
+            # (ntdata, _ncands)
+            _ctcels: th.Tensor = _ctpcomps_flt["cels"][:, _inv_idxs_l[_slctd]]
+            _vmetrics_d: dict[str, float] = tafalib.utils.evaluate(
+                data=vdata,
+                classifier=vclassifier,
+                cost_est=lambda x: tafalib.functional.knn_cost_est(
+                    x,
+                    lmbda=lmbda,
+                    txs=_tdata["xs"],
+                    tcels=_ctcels,
+                    tmpls=_ctmpls_l[_slctd],
+                    n_neighs=n_neighs,
+                    p=2,
+                ),
+                init_fidx=init_fidx,
+                tmpls=_ctmpls_l[_slctd],
+                lmbda=lmbda,
+                metrics_func=metrics_func,
+                plf=plf,
+            )
+            plf.log_dict(mylib.utils.add_prefix_to_dict(_vmetrics_d, "val"), step=_itr)
+        if ckpt_p is not None:
+            th.save(tmpls, os.path.join(ckpt_p, f"tmpls_itr{_itr}.pt"))
+    pbar.close()
+    return tmpls
 
 
 def make_templates_direct_minibatch_gradient(
