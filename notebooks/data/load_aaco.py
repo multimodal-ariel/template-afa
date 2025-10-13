@@ -36,3 +36,7 @@ tvolvo, vvolvo, tstvolvo = mydatasets.aaco.load_aaco_data("volvo", to_normalize=
 print(tvolvo["xs"].shape)
 
 # %%
+tctslice, vctslice, tstctslice = mydatasets.aaco.load_aaco_data("ct-slice-rel-loc")
+print(tctslice["xs"].shape)
+
+# %%
