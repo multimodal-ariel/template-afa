@@ -22,6 +22,10 @@ tmnist, vmnist, tstmnist = mydatasets.aaco.load_aaco_data("mnist")
 print(tmnist["xs"].shape, tmnist["ys"].shape)
 
 # %%
+tfmnist, vfmnist, tstfmnist = mydatasets.aaco.load_aaco_data("fashion-mnist")
+print(tfmnist["xs"].shape, tfmnist["ys"].shape)
+
+# %%
 tbg5, vbg5, tstbg5 = mydatasets.aaco.load_aaco_data("big5_C_cls", to_normalize=True)
 print(tbg5["xs"].shape)
 
