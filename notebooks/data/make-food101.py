@@ -44,17 +44,31 @@ _vdata = thv.datasets.Food101(
 # %%
 tdata = thd.cat(
     [
-        thd.make_tensordict({"xs": _x, "ys": th.as_tensor(_y)}, batch_size=(len(_x),))
+        thd.make_tensordict(
+            {"xs": _x[:, 0].flatten(1, 2), "ys": th.as_tensor(_y)},
+            batch_size=(len(_x),),
+        )
         for _x, _y in th_data.DataLoader(
-            _tdata, batch_size=8, shuffle=False, drop_last=False
+            _tdata,
+            batch_size=36,
+            shuffle=False,
+            drop_last=False,
+            num_workers=36,
         )
     ]
 )
 _tmpdata = thd.cat(
     [
-        thd.make_tensordict({"xs": _x, "ys": th.as_tensor(_y)}, batch_size=(len(_x),))
+        thd.make_tensordict(
+            {"xs": _x[:, 0].flatten(1, 2), "ys": th.as_tensor(_y)},
+            batch_size=(len(_x),),
+        )
         for _x, _y in th_data.DataLoader(
-            _vdata, batch_size=8, shuffle=False, drop_last=False
+            _vdata,
+            batch_size=36,
+            shuffle=False,
+            drop_last=False,
+            num_workers=36,
         )
     ]
 )
