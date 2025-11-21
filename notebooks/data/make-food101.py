@@ -22,7 +22,7 @@ _tdata = thv.datasets.Food101(
         [
             thv.transforms.PILToTensor(),
             thv.transforms.Grayscale(),
-            thv.transforms.Resize((512, 512)),
+            thv.transforms.Resize((64, 64)),
         ]
     ),
     split="train",
@@ -34,7 +34,7 @@ _vdata = thv.datasets.Food101(
         [
             thv.transforms.PILToTensor(),
             thv.transforms.Grayscale(),
-            thv.transforms.Resize((512, 512)),
+            thv.transforms.Resize((64, 64)),
         ]
     ),
     split="test",
