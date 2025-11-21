@@ -18,17 +18,17 @@ def load_aaco_data(
         ),
         allow_pickle=True,
     )
-    xst: np.ndarray = data["train"][0].astype(np.float32)
+    xst: np.ndarray = data["train"][0]
     yst: np.ndarray = data["train"][1].flatten()
-    xsv: np.ndarray = data["valid"][0].astype(np.float32)
+    xsv: np.ndarray = data["valid"][0]
     ysv: np.ndarray = data["valid"][1].flatten()
-    xstst: np.ndarray = data["test"][0].astype(np.float32)
+    xstst: np.ndarray = data["test"][0]
     ystst: np.ndarray = data["test"][1].flatten()
     if to_normalize:
         nmlr = skl_preproc.StandardScaler(copy=False)
-        xst = nmlr.fit_transform(xst)
-        xsv = nmlr.transform(xsv)
-        xstst = nmlr.transform(xstst)
+        xst = nmlr.fit_transform(th.as_tensor(xst, dtype=th.float32).numpy())
+        xsv = nmlr.transform(th.as_tensor(xsv, dtype=th.float32).numpy())
+        xstst = nmlr.transform(th.as_tensor(xstst, dtype=th.float32).numpy())
     tdata = thd.TensorDict(
         {
             "xs": th.as_tensor(xst, dtype=th.float32),
