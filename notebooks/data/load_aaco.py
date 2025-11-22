@@ -26,6 +26,10 @@ tfmnist, vfmnist, tstfmnist = mydatasets.aaco.load_aaco_data("fashion-mnist")
 print(tfmnist["xs"].shape, tfmnist["ys"].shape)
 
 # %%
+tgtsrb, vgtsrb, tstgtsrb = mydatasets.aaco.load_aaco_data("gtsrb-gray")
+print(tgtsrb["xs"].shape, tgtsrb["ys"].shape)
+
+# %%
 tfood, vfood, tstfood = mydatasets.aaco.load_aaco_data("food101")
 print(tfood["xs"].shape, tfood["ys"].shape)
 
@@ -46,5 +50,9 @@ print(tvolvo["xs"].shape)
 # %%
 tctslice, vctslice, tstctslice = mydatasets.aaco.load_aaco_data("ct-slice-rel-loc")
 print(tctslice["xs"].shape)
+
+# %%
+tctengine, vctengine, tstctengine = mydatasets.aaco.load_aaco_data("engine-fault")
+print(tctengine["xs"].shape)
 
 # %%
