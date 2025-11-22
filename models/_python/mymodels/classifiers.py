@@ -15,8 +15,7 @@ from typing import (
     TypeVar,
 )
 
-import mymodels.common
-import mymodels.protocols
+import lightning as pl
 import numpy as np
 import sklearn.cluster as skl_cluster
 import sklearn.linear_model as skl_linear_model
@@ -27,8 +26,10 @@ import torchmetrics as thm
 import tqdm.auto as tqdm
 import xgboost as xgbst
 
+from . import common, protocols
+
 MT = TypeVar("MT")
-SKLMT = TypeVar("SKLMT", bound=mymodels.protocols.ModuleHasPredictProba)
+SKLMT = TypeVar("SKLMT", bound=protocols.ModuleHasPredictProba)
 
 
 class SubsetFeatureClassifier(th.nn.Module, ABC, Generic[MT]):
@@ -225,6 +226,7 @@ class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]
 
     nnet: th.nn.Module
     fit_kwargs: _FitKwargs
+    plf: Optional[pl.Fabric]
 
     @cached_property
     def tdata(self) -> thd.TensorDict:
@@ -379,7 +381,11 @@ class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]
         state_dict_p: str,
     ) -> Self:
         classifier = cls(
-            nnet=nnet, xs_train=xs_train, ys_train=ys_train, fit_kwargs=fit_kwargs
+            nnet=nnet,
+            xs_train=xs_train,
+            ys_train=ys_train,
+            fit_kwargs=fit_kwargs,
+            plf=None,
         )
         classifier.load_state_dict(
             th.load(state_dict_p, map_location=classifier.device)
@@ -429,7 +435,7 @@ class _SubsetFeatureSKLClassifier(SubsetFeatureClassifier[SKLMT]):
     ) -> th.Tensor:
         classifier = self[act]
         ctxs_ = (
-            mymodels.common.to_cp_or_np(ctxs.to(device=self.device))
+            common.to_cp_or_np(ctxs.to(device=self.device))
             if self.use_cp
             else ctxs.numpy(force=True)
         )
@@ -448,7 +454,7 @@ class _SubsetFeatureSKLClassifier(SubsetFeatureClassifier[SKLMT]):
         fcomb: tuple[int, ...] = self.act_to_fcomb_exidx(act)[0]
         model = self.make_model_func()
         xs = (
-            mymodels.common.to_cp_or_np(
+            common.to_cp_or_np(
                 th.as_tensor(
                     self.xs_train[:, fcomb], dtype=th.float32, device=self.device
                 )
@@ -457,7 +463,7 @@ class _SubsetFeatureSKLClassifier(SubsetFeatureClassifier[SKLMT]):
             else self.xs_train[:, fcomb].astype(np.float32)
         )
         ys = (
-            mymodels.common.to_cp_or_np(
+            common.to_cp_or_np(
                 th.as_tensor(self.ys_train, dtype=th.long, device=self.device)
             )
             if self.use_cp
