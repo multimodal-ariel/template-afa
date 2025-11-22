@@ -142,20 +142,20 @@ def fit_nnet_clf(
             leave=False,
             dynamic_ncols=True,
         )
+        _fms: th.Tensor = tafalib.makers.candidates.make_feature_masks(
+            n_covs=n_covs,
+            n_masks=n_masks,
+            min_features=1,
+            max_features=None,
+            generator=None,
+        ).to(device=plf.device)
         for _btdata in _bpbar:
             if len(_btdata) == 1:
                 continue
             _btdata: thd.TensorDict = _btdata.to(device=plf.device)
             _bsz: int = len(_btdata)
-            _bfms: th.Tensor = tafalib.makers.candidates.make_feature_masks(
-                n_covs=n_covs,
-                n_masks=n_masks,
-                min_features=1,
-                max_features=None,
-                generator=None,
-            )
-            _nms: int = len(_bfms)
-            _bfms = _bfms[None, :, :].expand(_bsz, -1, -1).to(device=plf.device)
+            _nms: int = len(_fms)
+            _bfms: th.Tensor = _fms[None, :, :].expand(_bsz, -1, -1)
             _bxs: th.Tensor = _btdata["xs"][:, None, :].expand(-1, _nms, -1)
             _binps: th.Tensor = th.cat((_bxs * _bfms, _bfms), dim=2).flatten(0, 1)
             _bys: th.Tensor = _btdata["ys"][:, None].expand(-1, _nms).flatten(0, 1)
