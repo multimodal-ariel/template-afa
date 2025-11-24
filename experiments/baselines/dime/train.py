@@ -61,7 +61,7 @@ def main(cfg: MainConf):
     n_workers: int | None = 0
     tloader = th_data.DataLoader(
         th_data.TensorDataset(tdata["xs"], tdata["ys"]),
-        batch_size=cfg.bsz,
+        batch_size=min(cfg.bsz, len(tdata)),
         shuffle=True,
         pin_memory=True,
         drop_last=True,
