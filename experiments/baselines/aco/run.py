@@ -59,6 +59,17 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
             )
         )
         return aacolib.classifier.classifier_xgb(xgb_model)
+    elif dataset_name == "fashion-mnist":
+        # Load XGBoost model for MNIST dataset
+        xgb_model = xgbst.XGBClassifier()
+        xgb_model.load_model(
+            os.path.join(
+                os.path.dirname(aacolib.__file__),
+                "_saved_models",
+                "fashion_xgb_classifier_arb_subsets.json",
+            )
+        )
+        return aacolib.classifier.classifier_xgb(xgb_model)
     elif dataset_name == "big5_C_cls":
         # Load XGBoost model for MNIST dataset
         xgb_model = xgbst.XGBClassifier()
@@ -135,6 +146,7 @@ def load_mask_generator(dataset_name, input_dim):
     if dataset_name in [
         "cube_20_0.3",
         "mnist",
+        "fashion-mnist",
         "big5_C_cls",
         "volvo",
         "charfont-1500",
