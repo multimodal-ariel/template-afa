@@ -1,45 +1,34 @@
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional, Sequence, Type, TypeVar
+import logging
+import math
+from typing import Callable, Optional, Sequence, Type, TypeVar
 
 import torch as th
-
-_ActivationTypeStr = Literal["relu", "tanh", "sigmoid", "elu"]
-_ACTIVATION_TYPE_STR_TO_TYPE = {
-    "relu": th.nn.ReLU,
-    "tanh": th.nn.Tanh,
-    "sigmoid": th.nn.Sigmoid,
-    "elu": th.nn.ELU,
-}
+import torchinfo as thinfo
 
 ModuleT = TypeVar("ModuleT", bound=th.nn.Module)
 
 
-def make_fcn_from_conf(
+def make_lazy_nnet(
     in_features: int,
     out_features: int,
-    hidden_sizes: Sequence[int],
-    use_batch_norms: Sequence[bool],
-    activation_types: Sequence[Optional[_ActivationTypeStr]],
-    dropout_ps: Sequence[Optional[float]],
+    layers: Sequence[th.nn.Module] | th.nn.Sequential,
+    input_unflatten_shape: Optional[tuple[int, ...]] = None,
 ) -> th.nn.Sequential:
-    n_layers: int = len(hidden_sizes)
-    assert n_layers == len(use_batch_norms)
-    assert n_layers == len(activation_types)
-    assert n_layers == len(dropout_ps)
-    layer_specs = [
-        (
-            hsz,
-            th.nn.BatchNorm1d if use_bn else None,
-            _ACTIVATION_TYPE_STR_TO_TYPE[act_type] if act_type is not None else None,
-            dropout_p if dropout_p is not None else None,
-        )
-        for hsz, use_bn, act_type, dropout_p in zip(
-            hidden_sizes, use_batch_norms, activation_types, dropout_ps
-        )
-    ]
-    fcn = make_fcn(in_features, out_features, layer_specs)
-    return fcn
+    nnet: th.nn.Sequential = (
+        layers if isinstance(layers, th.nn.Sequential) else th.nn.Sequential(*layers)
+    )
+    if input_unflatten_shape is not None:
+        assert in_features == math.prod(input_unflatten_shape)
+        nnet.insert(0, th.nn.Unflatten(dim=1, unflattened_size=input_unflatten_shape))
+    nnet.extend([th.nn.Flatten(), th.nn.LazyLinear(out_features=out_features)])
+    # sanity check
+    lgr = logging.getLogger(make_lazy_nnet.__name__)
+    lgr.addHandler(logging.StreamHandler())
+    lgr.setLevel(logging.INFO)
+    lgr.info(thinfo.summary(nnet, input_size=(in_features,), batch_dim=0))
+    return nnet
 
 
 def make_fcn(
