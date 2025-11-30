@@ -35,6 +35,7 @@ class MainConf:
 class NeuralNetFitConf:
     opt_type: Any
     opt_kwargs: dict[str, Any]
+    n_iter_warmup: int | None
     n_iter: int
     bsz: int
     eval_every_n_iter: int
@@ -114,6 +115,7 @@ def fit_nnet_clf(
     n_masks: int,
     opt: th.optim.Optimizer,
     n_iter: int,
+    n_iter_warmup: int | None,
     bsz: int,
     plf: pl.Fabric,
     vdata: Optional[thd.TensorDict],
@@ -142,13 +144,23 @@ def fit_nnet_clf(
             leave=False,
             dynamic_ncols=True,
         )
-        _fms: th.Tensor = tafalib.makers.candidates.make_feature_masks(
-            n_covs=n_covs,
-            n_masks=n_masks,
-            min_features=1,
-            max_features=None,
-            generator=None,
-        ).to(device=plf.device)
+        _fms: th.Tensor = (
+            th.cat(
+                (
+                    tafalib.makers.candidates.make_feature_masks(
+                        n_covs=n_covs,
+                        n_masks=n_masks,
+                        min_features=1,
+                        max_features=None,
+                        generator=None,
+                    ).to(device=plf.device),
+                    th.ones((1, n_covs), dtype=th.float32, device=plf.device),
+                ),
+                dim=0,
+            )
+            if n_iter_warmup is None or _itr + 1 > n_iter_warmup
+            else th.ones((1, n_covs), dtype=th.float32, device=plf.device)
+        )
         for _btdata in _bpbar:
             if len(_btdata) == 1:
                 continue
@@ -246,6 +258,7 @@ def main(cfg: MainConf):
         tdata=tdata,
         n_masks=cfg.n_masks,
         opt=opt,
+        n_iter_warmup=cfg.nnet_fit_cfg.n_iter_warmup,
         n_iter=cfg.nnet_fit_cfg.n_iter,
         bsz=cfg.nnet_fit_cfg.bsz,
         plf=plf,

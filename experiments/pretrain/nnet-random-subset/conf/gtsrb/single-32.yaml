@@ -30,6 +30,7 @@ nnet_fit_cfg:
   opt_kwargs:
     lr: 1e-3
     amsgrad: true
+  n_iter_warmup: 10
   n_iter: 1_000
   bsz: 8_000
   eval_every_n_iter: 50
