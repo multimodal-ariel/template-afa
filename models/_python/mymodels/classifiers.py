@@ -123,7 +123,7 @@ class SubsetFeatureClassifier(th.nn.Module, ABC, Generic[MT]):
 
 class SubsetFeatureConcatClassifier(SubsetFeatureClassifier[MT]):
     @abstractmethod
-    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
+    def fit_(self, acts_tmpls: th.Tensor | None) -> dict[str, float]:
         """fit a concat subset feature classifier
 
         Args:
@@ -161,7 +161,7 @@ class SubsetFeatureConcatXGBClassifier(SubsetFeatureConcatClassifier[None]):
         self.rseed = rseed
         self._models = [xgbst.XGBClassifier(**self.xgb_kwargs) for _ in range(n_splits)]
 
-    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
+    def fit_(self, acts_tmpls: th.Tensor | None) -> dict[str, float]:
         txs: th.Tensor = th.as_tensor(self.xs_train, dtype=th.float32)
         tys: th.Tensor = th.as_tensor(self.ys_train)
         pbar = tqdm.tqdm(
@@ -174,16 +174,20 @@ class SubsetFeatureConcatXGBClassifier(SubsetFeatureConcatClassifier[None]):
             _xs: th.Tensor = txs[_idxs, None, :].expand(
                 -1, self.n_tmpl_per_instance, -1
             )
-            _fms: th.Tensor = th.stack(
-                [
-                    acts_tmpls[
-                        th.multinomial(
-                            th.arange(0, len(acts_tmpls), dtype=th.float32),
-                            self.n_tmpl_per_instance,
-                        )
+            _fms: th.Tensor = (
+                th.stack(
+                    [
+                        acts_tmpls[
+                            th.multinomial(
+                                th.arange(0, len(acts_tmpls), dtype=th.float32),
+                                self.n_tmpl_per_instance,
+                            )
+                        ]
+                        for _ in range(len(_xs))
                     ]
-                    for _ in range(len(_xs))
-                ]
+                )
+                if acts_tmpls is not None
+                else th.randint_like(_xs, 0, 2, dtype=th.float32)
             )
             # (_n_data, n_tmple_per_instance, 2 * n_covs)
             _minps: th.Tensor = th.cat((_xs * _fms, _fms), dim=2)
@@ -260,7 +264,8 @@ class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]
         return pyhats
 
     @th.enable_grad()
-    def fit_(self, acts_tmpls: th.Tensor) -> dict[str, float]:
+    def fit_(self, acts_tmpls: th.Tensor | None) -> dict[str, float]:
+        assert acts_tmpls is not None
         tdata: thd.TensorDict = self.tdata
         _fcounts: th.Tensor = th.sum(acts_tmpls, dim=0)
         init_fidx: int | None = (
