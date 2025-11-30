@@ -56,17 +56,6 @@ def main(cfg: MainConf):
     extdata: thd.TensorDict
     tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
     extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
-    # make classifier
-    tclassifier: mymodels.classifiers.SubsetFeatureClassifier = hd.utils.instantiate(
-        cfg.tclassifier, xs_train=extdata["xs"].numpy(), ys_train=extdata["ys"].numpy()
-    )
-    vclassifier: mymodels.classifiers.SubsetFeatureClassifier = tclassifier
-    if cfg.vclassifier is not None:
-        vclassifier = hd.utils.instantiate(
-            cfg.vclassifier,
-            xs_train=extdata["xs"].numpy(),
-            ys_train=extdata["ys"].numpy(),
-        )
     # configure logger and ckpt path
     os.makedirs(output_dir, exist_ok=True)
     tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
@@ -75,6 +64,25 @@ def main(cfg: MainConf):
         loggers=[tfb_logger, csv_logger],
         plugins=[plf_plugins_envs.LightningEnvironment()],  # type: ignore
     )
+    # make classifier
+    tclassifier: mymodels.classifiers.SubsetFeatureClassifier = hd.utils.instantiate(
+        cfg.tclassifier, xs_train=extdata["xs"].numpy(), ys_train=extdata["ys"].numpy()
+    )
+    if isinstance(tclassifier, mymodels.classifiers.SubsetFeatureConcatXGBClassifier):
+        import sklearn.exceptions as skl_exceptions
+        import sklearn.utils as skl_utils
+
+        try:
+            [skl_utils.validation.check_is_fitted(_m) for _m in tclassifier._models]
+        except skl_exceptions.NotFittedError:
+            tclassifier.fit_(None)
+    vclassifier: mymodels.classifiers.SubsetFeatureClassifier = tclassifier
+    if cfg.vclassifier is not None:
+        vclassifier = hd.utils.instantiate(
+            cfg.vclassifier,
+            xs_train=extdata["xs"].numpy(),
+            ys_train=extdata["ys"].numpy(),
+        )
     metrics_func = thm.MetricCollection(
         {
             "acc": thm.Accuracy(task="multiclass", num_classes=n_labels),
