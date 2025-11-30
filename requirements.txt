@@ -21,6 +21,7 @@ torchvision
 tensordict
 lightning
 torchmetrics
+torchinfo
 tensorboard
 swig
 gymnasium
