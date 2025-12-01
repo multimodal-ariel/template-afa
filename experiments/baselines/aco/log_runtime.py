@@ -47,7 +47,6 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
         eval_bsz: int | None
         n_instances: int | None
 
-    # Load the appropriate classifier based on dataset and model
     def load_classifier(dataset_name, X_train, y_train, input_dim):
         if dataset_name == "cube_20_0.3":
             # Use the ground truth classifier for Cube dataset
@@ -73,6 +72,17 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
                     os.path.dirname(aacolib.__file__),
                     "_saved_models",
                     "mnist_xgb_classifier_arb_subset.json",
+                )
+            )
+            return aacolib.classifier.classifier_xgb(xgb_model)
+        elif dataset_name == "fashion-mnist":
+            # Load XGBoost model for MNIST dataset
+            xgb_model = xgbst.XGBClassifier()
+            xgb_model.load_model(
+                os.path.join(
+                    os.path.dirname(aacolib.__file__),
+                    "_saved_models",
+                    "fashion_xgb_classifier_arb_subsets.json",
                 )
             )
             return aacolib.classifier.classifier_xgb(xgb_model)
@@ -104,6 +114,16 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
                     os.path.dirname(aacolib.__file__),
                     "_saved_models",
                     "charfont1500_xgb_classifier_arb_subsets.json",
+                )
+            )
+            return aacolib.classifier.classifier_xgb(xgb_model)
+        elif dataset_name == "ct-slice-rel-loc":
+            xgb_model = xgbst.XGBClassifier()
+            xgb_model.load_model(
+                os.path.join(
+                    os.path.dirname(aacolib.__file__),
+                    "_saved_models",
+                    "ct-slice-rel-loc_xgb_classifier_arb_subsets.json",
                 )
             )
             return aacolib.classifier.classifier_xgb(xgb_model)
@@ -140,9 +160,11 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
         if dataset_name in [
             "cube_20_0.3",
             "mnist",
+            "fashion-mnist",
             "big5_C_cls",
             "volvo",
             "charfont-1500",
+            "ct-slice-rel-loc",
         ]:
             return aacolib.mask_generator.random_mask_generator(10000, input_dim, 1000)
         elif dataset_name == "grid_data" or dataset_name == "gas":
