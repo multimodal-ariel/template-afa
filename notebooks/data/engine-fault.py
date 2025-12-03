@@ -5,10 +5,7 @@ import os
 import pickle as pkl
 
 import mydatasets
-import numpy as np
 import pandas as pd
-import sklearn.compose as skl_compose
-import sklearn.preprocessing as skl_preproc
 import tensordict as thd
 import torch as th
 import torch.utils.data as th_data
