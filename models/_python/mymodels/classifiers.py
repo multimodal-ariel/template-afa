@@ -390,7 +390,7 @@ class SubsetFeatureConcatNeuralNetClassifier(SubsetFeatureConcatClassifier[None]
             xs_train=xs_train,
             ys_train=ys_train,
             fit_kwargs=fit_kwargs,
-            plf=None,
+            # plf=None,
         )
         classifier.load_state_dict(
             th.load(state_dict_p, map_location=classifier.device)
