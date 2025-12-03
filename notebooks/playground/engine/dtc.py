@@ -90,6 +90,32 @@ skl_tree.plot_tree(
         "low voltage",
     ],
 )
+skl_tree.export_graphviz(
+    clf,
+    out_file="engine-tree.dot",
+    feature_names=[
+        "MAP",
+        "TPS",
+        "Force",
+        "Power",
+        "RPM",
+        "Consumption L/H",
+        "Consumption L/100KM",
+        "Speed",
+        "CO",
+        "HC",
+        "CO2",
+        "O2",
+        "Lambda",
+        "AFR",
+    ],
+    class_names=[
+        "normal",
+        "rich mixture",
+        "lean mixture",
+        "low voltage",
+    ],
+)
 
 # %%
 vpyhats_rndms: th.Tensor = th.as_tensor(

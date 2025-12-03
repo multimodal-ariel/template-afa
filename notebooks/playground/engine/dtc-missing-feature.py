@@ -1,21 +1,11 @@
 # %%
 from __future__ import annotations
 
-import os
-import pickle as pkl
-
 import mydatasets
-import numpy as np
 import pandas as pd
-import sklearn.compose as skl_compose
-import sklearn.preprocessing as skl_preproc
 import sklearn.tree as skl_tree
-import tabulate as tbl
-import tensordict as thd
 import torch as th
-import torch.utils.data as th_data
 import torchmetrics as thm
-import tafalib.makers
 
 # %%
 tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(
@@ -37,7 +27,7 @@ tys: th.Tensor = th.cat(
 
 # %%
 clf = skl_tree.DecisionTreeClassifier(
-    max_depth=7, splitter="best", criterion="log_loss"
+    max_depth=13, splitter="best", criterion="log_loss"
 )
 clf.fit(txs.numpy(), tys.numpy())
 
@@ -76,6 +66,53 @@ tstmetrics_d: dict[str, float] = {
 print(pd.Series(tstmetrics_d))
 
 # %%
+tpyhats_rndms: th.Tensor = th.as_tensor(
+    clf.predict_proba(
+        th.where(
+            th.randint_like(tdata["xs"], 0, 2).to(dtype=th.bool), tdata["xs"], th.nan
+        ).numpy()
+    )
+)
+metrics_func.reset()
+metrics_func.update(tpyhats_rndms.to(device="cpu"), tdata["ys"].to(device="cpu"))
+trndmsmetrics_d: dict[str, float] = {
+    k: v.item() for k, v in metrics_func.compute().items()
+}
+print(pd.Series(trndmsmetrics_d))
+
+# %%
+vpyhats_rndms: th.Tensor = th.as_tensor(
+    clf.predict_proba(
+        th.where(
+            th.randint_like(vdata["xs"], 0, 2).to(dtype=th.bool), vdata["xs"], th.nan
+        ).numpy()
+    )
+)
+metrics_func.reset()
+metrics_func.update(vpyhats_rndms.to(device="cpu"), vdata["ys"].to(device="cpu"))
+vrndmsmetrics_d: dict[str, float] = {
+    k: v.item() for k, v in metrics_func.compute().items()
+}
+print(pd.Series(vrndmsmetrics_d))
+
+# %%
+tstpyhats_rndms: th.Tensor = th.as_tensor(
+    clf.predict_proba(
+        th.where(
+            th.randint_like(tstdata["xs"], 0, 2).to(dtype=th.bool),
+            tstdata["xs"],
+            th.nan,
+        ).numpy()
+    )
+)
+metrics_func.reset()
+metrics_func.update(tstpyhats_rndms.to(device="cpu"), tstdata["ys"].to(device="cpu"))
+tstrndmsmetrics_d: dict[str, float] = {
+    k: v.item() for k, v in metrics_func.compute().items()
+}
+print(pd.Series(tstrndmsmetrics_d))
+
+# %%
 skl_tree.plot_tree(
     clf,
     feature_names=[
@@ -101,20 +138,5 @@ skl_tree.plot_tree(
         "low voltage",
     ],
 )
-
-# %%
-vpyhats_rndms: th.Tensor = th.as_tensor(
-    clf.predict_proba(
-        th.where(
-            th.randint_like(vdata["xs"], 0, 2).to(dtype=th.bool), vdata["xs"], th.nan
-        ).numpy()
-    )
-)
-metrics_func.reset()
-metrics_func.update(vpyhats_rndms.to(device="cpu"), vdata["ys"].to(device="cpu"))
-vrndmsmetrics_d: dict[str, float] = {
-    k: v.item() for k, v in metrics_func.compute().items()
-}
-print(pd.Series(vrndmsmetrics_d))
 
 # %%

@@ -5,7 +5,7 @@ import os
 import pickle as pkl
 
 import graphviz
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 import mydatasets
 import numpy as np
 import pandas as pd
