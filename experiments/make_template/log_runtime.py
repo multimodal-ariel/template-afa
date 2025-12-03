@@ -93,6 +93,14 @@ def main(cfg: MainConf):
     extdata: thd.TensorDict
     tdata = _tdata[_tdata_shuffle_idxs[: len(_tdata) // 2]]
     extdata = _tdata[_tdata_shuffle_idxs[len(_tdata) // 2 :]]
+    # configure logger and ckpt path
+    tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
+    csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
+    plf = pl.Fabric(
+        loggers=[tfb_logger, csv_logger],
+        accelerator="cpu",
+        plugins=plf_plugins_envs.LightningEnvironment(),
+    )
     # make classifier
     tclassifier: mymodels.classifiers.SubsetFeatureClassifier = hd.utils.instantiate(
         tafa_cfg.tclassifier,
@@ -122,13 +130,6 @@ def main(cfg: MainConf):
                 vclassifier.load_state_dict(th.load(vclassifier_p, map_location="cpu"))
             else:
                 vclassifier.fit_(tmpls)
-    tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
-    csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
-    plf = pl.Fabric(
-        loggers=[tfb_logger, csv_logger],
-        accelerator="cpu",
-        plugins=plf_plugins_envs.LightningEnvironment(),
-    )
     start_time_ns: int = time.time_ns()
     metrics_d: dict[str, float] = tafalib.utils.evaluate(
         data=vdata[
