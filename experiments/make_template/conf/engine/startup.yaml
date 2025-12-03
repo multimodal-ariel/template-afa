@@ -1,0 +1,40 @@
+hydra:
+  job:
+    name: engine
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 10
+
+data:
+  # NOTE mnist length of xs and length of ys in mnist does not match
+  _target_: mydatasets.aaco.load_aaco_data
+  name: engine-fault
+  to_normalize: true
+tclassifier:
+  _target_: _classifiers.EngineFaultXGBClassifier
+  xgb_kwargs:
+    n_estimators: 8
+    max_depth: 8
+    # n_jobs: 3
+  fraction_training_data_per_split: 1.0
+  n_splits: 16
+  n_tmpl_per_instance: 250
+vclassifier:
+  _target_: _classifiers.EngineFaultDecisionTreeClassifier
+  dtc_kwargs:
+    max_depth: 8
+    splitter: "best"
+    criterion: "log_loss"
+    random_state: 279
+# make_templates_fn:
+#   TODO override this
+#   _target_: ...
+init_fidx: 8
+lmbda: 0.1
+n_neighs: 100
+bsz: 81920
+plf:
+  _target_: lightning.Fabric
+  accelerator: cpu
