@@ -4,7 +4,8 @@ import copy
 import itertools as itrtls
 import math
 import os
-from typing import Callable, Generator, Iterable, Optional
+from abc import abstractmethod
+from typing import Callable, Generator, Iterable, Optional, Protocol
 
 import lightning as pl
 import mylib
@@ -68,6 +69,95 @@ def identify_init_fidx(
     return int(th.argmin(best_fm)), best_fm
 
 
+class _PostHocIdentifyInitialFeatureFunc(Protocol):
+    @abstractmethod
+    def __call__(
+        self,
+        tdata: thd.TensorDict,
+        tmpls: th.Tensor,
+        tpcomp: Optional[thd.TensorDict],
+        classifier: mymodels.classifiers.SubsetFeatureClassifier,
+        lmbda: float,
+        bsz: int,
+        plf: pl.Fabric,
+    ) -> tuple[int, thd.TensorDict]:
+        pass
+
+
+def post_hoc_count_based_identify_init_fidx(
+    tdata: thd.TensorDict,
+    tmpls: th.Tensor,
+    tpcomp: Optional[thd.TensorDict],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    lmbda: float,
+    bsz: int,
+    plf: pl.Fabric,
+) -> tuple[int, thd.TensorDict]:
+    assert tpcomp is not None
+    n_tmpls: int = len(tmpls)
+    assert tpcomp.shape[1] == n_tmpls
+    # (n, n_tmpls)
+    rwds: th.Tensor = tpcomp["rwds"]
+    # (n, )
+    max_rwds, max_tmpl_idxs = th.max(rwds, dim=1)
+    # (n, n_covs)
+    fms: th.Tensor = tmpls[max_tmpl_idxs]
+    fcounts: th.Tensor = th.sum(fms, dim=0)
+    sorted_fcounts, sorted_fidxs = th.sort(fcounts, descending=True)
+    infos: thd.TensorDict = thd.make_tensordict(
+        {
+            "max_rwds": max_rwds,
+            "max_tmpl_idxs": max_tmpl_idxs,
+            "sorted_fcounts": sorted_fcounts,
+            "sorted_fidxs": sorted_fidxs,
+        }
+    ).auto_device_()
+    return int(sorted_fidxs[0].item()), infos
+
+
+@th.no_grad()
+def post_cost_try_then_identify_init_fidx(
+    tdata: thd.TensorDict,
+    tmpls: th.Tensor,
+    tpcomp: Optional[thd.TensorDict],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    lmbda: float,
+    bsz: int,
+    plf: pl.Fabric,
+) -> tuple[int, thd.TensorDict]:
+    txs: th.Tensor = tdata["xs"]
+    n_covs: int = txs.shape[1]
+    best_mean_rwd: float = -th.inf
+    best_init_fidx: int = -1
+    pbar = tqdm.trange(n_covs, desc="try-init-feat", dynamic_ncols=True, leave=False)
+    for _fidx in pbar:
+        _tmpls: th.Tensor = tmpls.clone()
+        _tmpls[:, _fidx] = 1
+        _tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+            tmpls=_tmpls,
+            data=tdata,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )
+        _rwds: th.Tensor = _tpcomp["rwds"]
+        _mean_rwd: float = th.mean(th.max(_rwds, dim=1)[0], dim=0).item()
+        if _mean_rwd > best_mean_rwd:
+            best_mean_rwd = _mean_rwd
+            best_init_fidx = _fidx
+        pbar.set_postfix(
+            {
+                "mean-rwd": _mean_rwd,
+                "best-mean-rwd": best_mean_rwd,
+                "best-init-fidx": best_init_fidx,
+            }
+        )
+    pbar.close()
+    infos = thd.make_tensordict({"best_mean_rwd": th.as_tensor(best_mean_rwd)})
+    return best_init_fidx, infos
+
+
 # NOTE make templates from scratch
 @th.no_grad()
 def make_templates_vanilla(
@@ -75,7 +165,7 @@ def make_templates_vanilla(
     max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     to_update_classifier: bool,
-    init_fidx: int,
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
     n_tmpls: int,
     n_cands: int,
     min_features: int,
@@ -109,13 +199,23 @@ def make_templates_vanilla(
     n_covs: int = classifier.n_covs
     max_features = n_covs if max_features is None else max_features
     # NOTE init. candidate templates
-    ctmpls: th.Tensor = tafalib_makers_candidates.make_template_candidates(
-        n_covs=n_covs,
-        init_fidx=init_fidx,
-        n_cands_targ=n_cands,
-        min_features=min_features,
-        max_features=max_features,
-        generator=generator,
+    ctmpls: th.Tensor = (
+        tafalib_makers_candidates.make_template_candidates(
+            n_covs=n_covs,
+            init_fidx=init_fidx,
+            n_cands_targ=n_cands,
+            min_features=min_features,
+            max_features=max_features,
+            generator=generator,
+        )
+        if init_fidx is not None and isinstance(init_fidx, int)
+        else tafalib_makers_candidates.make_feature_masks(
+            n_covs=n_covs,
+            n_masks=n_cands,
+            min_features=min_features,
+            max_features=max_features,
+            generator=generator,
+        )
     )
     if (
         isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
@@ -145,6 +245,21 @@ def make_templates_vanilla(
         plf=plf,
         log_prefix="vanilla_mktmpl",
     )
+    tpcomp.auto_batch_size_(2)
+    tpcomp_slctd: thd.TensorDict = tpcomp[:, slctd_ms]
+    if init_fidx is None:
+        init_fidx = post_hoc_count_based_identify_init_fidx
+    if not isinstance(init_fidx, int):
+        fidx = init_fidx(
+            tdata=tdata,
+            tmpls=tmpls,
+            tpcomp=tpcomp_slctd,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )[0]
+        tmpls[:, fidx] = 1
     if (
         isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
         and to_update_classifier
@@ -354,7 +469,7 @@ def make_templates_fix_rounds(
     max_tdata: Optional[int],
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     to_update_classifier: bool,
-    init_fidx: int,
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
     n_tmpls_targ: int,
     n_cands_init: int,
     n_cands_mutate: int | None,
@@ -403,13 +518,23 @@ def make_templates_fix_rounds(
     ):
         if ctmpls is None or tmpls is None or slctd_ms is None:
             # initialize candidate pool
-            ctmpls = tafalib_makers_candidates.make_template_candidates(
-                n_covs=n_covs,
-                init_fidx=init_fidx,
-                n_cands_targ=n_cands_init,
-                min_features=min_features,
-                max_features=max_features,
-                generator=generator,
+            ctmpls = (
+                tafalib_makers_candidates.make_template_candidates(
+                    n_covs=n_covs,
+                    init_fidx=init_fidx,
+                    n_cands_targ=n_cands_init,
+                    min_features=min_features,
+                    max_features=max_features,
+                    generator=generator,
+                )
+                if init_fidx is not None and isinstance(init_fidx, int)
+                else tafalib_makers_candidates.make_feature_masks(
+                    n_covs=n_covs,
+                    n_masks=n_cands_init,
+                    min_features=1,
+                    max_features=max_features,
+                    generator=generator,
+                )
             )
         else:
             # update candidate pool from existing templates
@@ -461,6 +586,37 @@ def make_templates_fix_rounds(
         ):
             classifier.fit_(tmpls)
     assert tmpls is not None
+    tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+        tmpls,
+        data=(
+            tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)),
+                    num_samples=max_tdata,
+                    generator=generator,
+                )
+            ]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        ),
+        classifier=classifier,
+        lmbda=lmbda,
+        bsz=bsz,
+        plf=plf,
+    )
+    if init_fidx is None:
+        init_fidx = post_hoc_count_based_identify_init_fidx
+    if not isinstance(init_fidx, int):
+        fidx = init_fidx(
+            tdata=tdata,
+            tmpls=tmpls,
+            tpcomp=tpcomp,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )[0]
+        tmpls[:, fidx] = 1
     return tmpls
 
 
@@ -2105,7 +2261,7 @@ def _update_template_candidates(
 def _update_template_candidates_fix_rounds(
     ctmpls: th.Tensor,
     slctd_ms: th.Tensor,
-    init_fidx: int,
+    init_fidx: Optional[int],
     n_cands_init: int,
     n_cands_mutate: int | None,
     n_cands_targ: int | None,
@@ -2151,7 +2307,7 @@ def _update_template_candidates_fix_rounds(
 
 def _mutate_tmpls(
     tmpls_prv: th.Tensor,
-    init_fidx: int,
+    init_fidx: Optional[int],
     n_cands_targ: int,
     min_features: int,
     generator: Optional[th.Generator],
@@ -2183,7 +2339,8 @@ def _mutate_tmpls(
         # indices to previously selected feature
         _fidxs: th.Tensor = th.argwhere(_tmpl == 1).flatten()
         # prevent init_fidx from being mutated
-        _fidxs = _fidxs[_fidxs != init_fidx]
+        if init_fidx is not None:
+            _fidxs = _fidxs[_fidxs != init_fidx]
         # set mutated feature to be zero
         _tmpl[
             _fidxs[
@@ -2206,7 +2363,7 @@ def _mutate_tmpls(
 def _fill_fcs_set_with_random_tmpls(
     fcs_set: set[tuple[int, ...]],
     n_covs: int,
-    init_fidx: int,
+    init_fidx: Optional[int],
     n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
@@ -2286,7 +2443,7 @@ def _fill_fcs_set_with_random_tmpls(
                 _ps, num_samples=_nfeats, generator=generator
             ).tolist()
             # make sure initial feature is in fcomb
-            if init_fidx not in _fc_l:
+            if init_fidx is not None and init_fidx not in _fc_l:
                 _fc_l.append(init_fidx)
                 _fc_l = _fc_l[1:]
             _fc_l.sort()
