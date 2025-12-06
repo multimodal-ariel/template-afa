@@ -2261,7 +2261,7 @@ def _update_template_candidates(
 def _update_template_candidates_fix_rounds(
     ctmpls: th.Tensor,
     slctd_ms: th.Tensor,
-    init_fidx: Optional[int],
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
     n_cands_init: int,
     n_cands_mutate: int | None,
     n_cands_targ: int | None,
@@ -2307,7 +2307,7 @@ def _update_template_candidates_fix_rounds(
 
 def _mutate_tmpls(
     tmpls_prv: th.Tensor,
-    init_fidx: Optional[int],
+    init_fidx: Optional[int|_PostHocIdentifyInitialFeatureFunc],
     n_cands_targ: int,
     min_features: int,
     generator: Optional[th.Generator],
@@ -2339,7 +2339,7 @@ def _mutate_tmpls(
         # indices to previously selected feature
         _fidxs: th.Tensor = th.argwhere(_tmpl == 1).flatten()
         # prevent init_fidx from being mutated
-        if init_fidx is not None:
+        if init_fidx is not None and isinstance(init_fidx, int):
             _fidxs = _fidxs[_fidxs != init_fidx]
         # set mutated feature to be zero
         _tmpl[
@@ -2443,7 +2443,11 @@ def _fill_fcs_set_with_random_tmpls(
                 _ps, num_samples=_nfeats, generator=generator
             ).tolist()
             # make sure initial feature is in fcomb
-            if init_fidx is not None and init_fidx not in _fc_l:
+            if (
+                init_fidx is not None
+                and isinstance(init_fidx, int)
+                and init_fidx not in _fc_l
+            ):
                 _fc_l.append(init_fidx)
                 _fc_l = _fc_l[1:]
             _fc_l.sort()
