@@ -2307,7 +2307,7 @@ def _update_template_candidates_fix_rounds(
 
 def _mutate_tmpls(
     tmpls_prv: th.Tensor,
-    init_fidx: Optional[int|_PostHocIdentifyInitialFeatureFunc],
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
     n_cands_targ: int,
     min_features: int,
     generator: Optional[th.Generator],
@@ -2363,7 +2363,7 @@ def _mutate_tmpls(
 def _fill_fcs_set_with_random_tmpls(
     fcs_set: set[tuple[int, ...]],
     n_covs: int,
-    init_fidx: Optional[int],
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
     n_cands_targ: int,
     min_features: int,
     max_features: Optional[int],
