@@ -2390,7 +2390,7 @@ def _fill_fcs_set_with_random_tmpls(
             if isinstance(init_fidx, int)
             else [
                 min(math.comb(n_covs, i), th.iinfo(th.long).max)
-                for i in range(min_features, max_features+1)
+                for i in range(min_features, max_features + 1)
             ]
         ),
         dtype=th.long,
@@ -2438,7 +2438,10 @@ def _fill_fcs_set_with_random_tmpls(
             continue
         _init_fcs_set_len: int = len(_fcs_set)
         _nfeats: int = _k + min_features
+        _attempts: int = 0
         while len(_fcs_set) - _init_fcs_set_len < _count:
+            if _attempts >= 5 * n_cands_targ:
+                break
             _ps: th.Tensor = (
                 th.ones((n_covs,)) if prv_featcounts is None else prv_featcounts
             )
@@ -2460,4 +2463,5 @@ def _fill_fcs_set_with_random_tmpls(
             _fc = tuple(_fc_l)
             if _fc not in _fcs_set:
                 _fcs_set.add(_fc)
+            _attempts = _attempts + 1
     return fcs_sets_by_bins
