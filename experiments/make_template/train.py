@@ -26,7 +26,7 @@ class MainConf:
     tclassifier: Any
     vclassifier: Optional[Any]
     make_templates_fn: Any
-    init_fidx: int
+    init_fidx: int | Any | None
     lmbda: float
     n_neighs: int
     bsz: int
@@ -126,10 +126,13 @@ def main(cfg: MainConf):
     make_templates_fn: Callable = hd.utils.instantiate(
         cfg.make_templates_fn, _partial_=True
     )
+    init_fidx: int | Callable | None = cfg.init_fidx
+    if cfg.init_fidx is not None and not isinstance(cfg.init_fidx, int):
+        init_fidx = hd.utils.instantiate(cfg.init_fidx, _partial_=True)
     tmpls: th.Tensor = make_templates_fn(
         tdata=tdata,
         classifier=tclassifier,
-        init_fidx=cfg.init_fidx,
+        init_fidx=init_fidx,
         lmbda=cfg.lmbda,
         bsz=cfg.bsz,
         plf=plf,
@@ -163,7 +166,11 @@ def main(cfg: MainConf):
             n_neighs=cfg.n_neighs,
             p=2,
         ),
-        init_fidx=cfg.init_fidx,
+        init_fidx=(
+            init_fidx
+            if isinstance(init_fidx, int)
+            else int(th.argwhere(th.all(tmpls.to(dtype=th.bool), dim=0).flatten())[0])
+        ),
         tmpls=tmpls,
         lmbda=cfg.lmbda,
         metrics_func=metrics_func,

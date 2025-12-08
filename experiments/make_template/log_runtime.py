@@ -5,7 +5,7 @@ import os
 import time
 import traceback
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import hydra as hd
 import lightning as pl
@@ -44,7 +44,7 @@ class TAFAMainConf:
     tclassifier: Any
     vclassifier: Optional[Any]
     make_templates_fn: Any
-    init_fidx: int
+    init_fidx: int | Any | None
     lmbda: float
     n_neighs: int
     bsz: int
@@ -130,6 +130,7 @@ def main(cfg: MainConf):
                 vclassifier.load_state_dict(th.load(vclassifier_p, map_location="cpu"))
             else:
                 vclassifier.fit_(tmpls)
+    init_fidx: int | Callable | None = tafa_cfg.init_fidx
     start_time_ns: int = time.time_ns()
     metrics_d: dict[str, float] = tafalib.utils.evaluate(
         data=vdata[
@@ -145,7 +146,11 @@ def main(cfg: MainConf):
             n_neighs=tafa_cfg.n_neighs,
             p=2,
         ),
-        init_fidx=tafa_cfg.init_fidx,
+        init_fidx=(
+            init_fidx
+            if isinstance(init_fidx, int)
+            else int(th.argwhere(th.all(tmpls.to(dtype=th.bool), dim=0).flatten())[0])
+        ),
         tmpls=tmpls,
         lmbda=tafa_cfg.lmbda,
         metrics_func=thm.MetricCollection(
