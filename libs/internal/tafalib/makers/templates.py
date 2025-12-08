@@ -603,7 +603,7 @@ def make_templates_fix_rounds(
         lmbda=lmbda,
         bsz=bsz,
         plf=plf,
-    )
+    ).auto_batch_size_(2)
     if init_fidx is None:
         init_fidx = post_hoc_count_based_identify_init_fidx
     if not isinstance(init_fidx, int):
