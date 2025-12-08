@@ -2380,14 +2380,19 @@ def _fill_fcs_set_with_random_tmpls(
     [fcs_sets_by_bins[len(_fc) - min_features].add(_fc) for _fc in fcs_set]
     # compute maximum feature combinations allowed in each bin
     bincnt_fcs: th.Tensor = th.as_tensor(
-        [
-            # in order to accomondate for init_fidx,
-            # both n_covs and i is one less than desired n_feats
-            min(math.comb(n_covs - 1, i), th.iinfo(th.long).max)
-            for i in range(
-                min_features - 1, n_covs if max_features is None else max_features
-            )
-        ],
+        (
+            [
+                # in order to accomondate for init_fidx,
+                # both n_covs and i is one less than desired n_feats
+                min(math.comb(n_covs - 1, i), th.iinfo(th.long).max)
+                for i in range(min_features - 1, max_features)
+            ]
+            if isinstance(init_fidx, int)
+            else [
+                min(math.comb(n_covs, i), th.iinfo(th.long).max)
+                for i in range(min_features, max_features+1)
+            ]
+        ),
         dtype=th.long,
     )
     n_cands_targ = (
