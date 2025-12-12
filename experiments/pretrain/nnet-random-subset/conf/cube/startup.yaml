@@ -1,0 +1,44 @@
+hydra:
+  job:
+    name: cube
+  run:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+  # sweep:
+  #   dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+  #   subdir: ${hydra.job.num}
+  # launcher:
+  #   n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: cube_20_0.3
+  to_normalize: true
+n_masks: 2048
+nnet:
+  _target_: mymodels.nn.make_fcn
+  layer_specs: [
+      [
+        32,
+        "${get_cls: torch.nn.LazyBatchNorm1d}",
+        "${get_cls: torch.nn.ELU}",
+        null,
+      ], # two layers
+      [
+        32,
+        "${get_cls: torch.nn.LazyBatchNorm1d}",
+        "${get_cls: torch.nn.ELU}",
+        null,
+      ], # two layers
+    ]
+nnet_fit_cfg:
+  opt_type: "${get_cls: torch.optim.AdamW}"
+  opt_kwargs:
+    lr: 1e-3
+    amsgrad: true
+  n_iter_warmup: 10
+  n_iter: 3_000
+  bsz: 512
+  eval_every_n_iter: 10
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto
