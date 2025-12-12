@@ -11,3 +11,4 @@ python train.py -m -cp=conf/gas -cn=startup hydra/launcher=joblib hydra.launcher
 
 python train.py -m -cp=conf/mnist/ -cn=startup hydra/launcher=joblib hydra.launcher.n_jobs=1 jafa_cfg.r_cost='range(-0.005,-0.000249,0.00025)' jafa_cfg.pretrain=500 # 33GB of gpu
 
+python train.py -m -cp=conf/fashion/ -cn=startup hydra/launcher=joblib hydra.launcher.n_jobs=1 jafa_cfg.r_cost='range(-0.005,-0.000249,0.00025)' jafa_cfg.pretrain=500 # 33GB of gpu
