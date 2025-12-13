@@ -1,0 +1,7 @@
+_target_: tafalib.makers.templates.make_templates_vanilla
+max_tdata: null
+n_tmpls: 1024
+n_cands: 20_000
+min_features: 1
+max_features: 32
+to_update_classifier: false

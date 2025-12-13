@@ -1,0 +1,10 @@
+_target_: tafalib.makers.templates.make_templates_reduce_features
+max_tdata: null
+n_tmpls_targ: 1024
+n_cands_targ: 20_000
+min_features_targ: 1
+max_features_targ: null
+min_features_init: 150
+feature_decrement: 10
+use_feature_importance_sampling: true
+to_update_classifier: false
