@@ -1,5 +1,13 @@
+import os
+from typing import TYPE_CHECKING
+
+import hydra as hd
+import mydatasets
+import mylib
+import mymodels
 import numpy as np
 import torch as th
+from omegaconf import OmegaConf
 from scipy.stats import norm
 from xgboost import XGBClassifier
 
@@ -134,3 +142,52 @@ class classifier_xgb:
 
     def __call__(self, X, idx):
         return th.tensor(self.xgb_model.predict_proba(X))
+
+
+def _make_concat_nnet_classifier_from_pretrain_run(
+    run_p: str,
+    xs_train: np.ndarray,
+    ys_train: np.ndarray,
+    fit_kwargs: mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier._FitKwargs,
+    classifier_fn: str = "classifier.pt",
+) -> mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier:
+
+    # try to load file from project root if run_p does not exist
+    if not os.path.exists(run_p):
+        run_p = os.path.join(mylib.utils.get_project_root_dir(), run_p)
+    run_cfg = OmegaConf.load(os.path.join(run_p, ".hydra", "config.yaml"))
+    n_covs: int = xs_train.shape[1]
+    n_labels: int = len(np.unique(ys_train))
+    classifier = mymodels.classifiers.SubsetFeatureConcatNeuralNetClassifier.from_saved_state_dict(
+        nnet=hd.utils.instantiate(
+            run_cfg.nnet,
+            in_features=n_covs * 2,
+            out_features=n_labels,
+        ),
+        xs_train=xs_train,
+        ys_train=ys_train,
+        fit_kwargs=fit_kwargs,
+        state_dict_p=os.path.join(run_p, classifier_fn),
+    )
+    return classifier
+
+
+class CubeNeuralNetClassifier:
+
+    def __init__(self):
+        tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("fashion-mnist-16x16")
+        self.nnet = _make_concat_nnet_classifier_from_pretrain_run(
+            run_p="periments/pretrain/nnet-random-subset/outputs/cube/20251211_214511",
+            xs_train=tdata["xs"],
+            ys_train=tdata["ys"],
+            fit_kwargs={
+                "opt_type": th.optim.Adam,
+                "opt_kwargs": {"lr": 1e03},
+                "n_iter": 100,
+                "bsz": 4096,
+            },
+        )
+        self.nnet
+
+    def __call__(self, X, idx):
+        return self.nnet.predict_proba(*th.chunk(X, chunks=2, dim=1))

@@ -11,6 +11,7 @@ import aacolib.mask_generator
 import hydra as hd
 import lightning as pl
 import lightning.fabric.loggers as plf_loggers
+import mydatasets
 import mylib.utils
 import tensordict as thd
 import torch as th
@@ -37,7 +38,8 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
         return aacolib.classifier.classifier_ground_truth(
             num_features=20, num_classes=8, std=0.3
         )
-
+    elif dataset_name == "cube_20_0.3-nnet":
+        return aacolib.classifier.CubeNeuralNetClassifier()
     elif dataset_name == "grid_data" or dataset_name == "gas":
         # Use XGB dictionary classifier for Grid and Gas10 datasets
         return aacolib.classifier.classifier_xgb_dict(
@@ -145,6 +147,7 @@ def get_knn(
 def load_mask_generator(dataset_name, input_dim):
     if dataset_name in [
         "cube_20_0.3",
+        "cube_20_0.3-nnet",
         "mnist",
         "fashion-mnist",
         "big5_C_cls",
@@ -364,7 +367,11 @@ def main(cfg: MainConf):
     # _delay_import()
     output_dir: str = HydraConfig.get().runtime.output_dir
     # make dataset
-    tdata, vdata, tstdata = hd.utils.call(cfg.data)
+    tdata, vdata, tstdata = (
+        mydatasets.aaco.load_aaco_data("cube_20_0.3")
+        if cfg.data.name == "cube_20_0.3-nnet"
+        else hd.utils.call(cfg.data)
+    )
     n_covs: int = tdata["xs"].shape[1]
     n_labels: int = len(th.unique(tdata["ys"]))
     # load aaco prereq.
