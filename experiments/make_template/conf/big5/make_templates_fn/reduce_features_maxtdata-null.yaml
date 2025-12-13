@@ -7,4 +7,4 @@ max_features_targ: null
 min_features_init: 45
 feature_decrement: 5
 use_feature_importance_sampling: true
-to_update_classifier: true
+to_update_classifier: false
