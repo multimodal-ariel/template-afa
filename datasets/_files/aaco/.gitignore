@@ -2,5 +2,6 @@ charfont-1500.pkl
 charfont-3000.pkl
 traffic.pkl
 fashion-mnist.pkl
+fashion-mnist-16x16.pkl
 food101.pkl
 omniglot.pkl
