@@ -1,0 +1,17 @@
+hydra:
+  job:
+    name: fashion-16x16
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: fashion-mnist-16x16
+  to_normalize: true
+init_fidx: 100
+lmbda: 0.5
+n_neighs: 20
+eval_bsz: 256

@@ -86,6 +86,17 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
                 )
             )
             return aacolib.classifier.classifier_xgb(xgb_model)
+        elif dataset_name == "fashion-mnist-16x16":
+            # Load XGBoost model for MNIST dataset
+            xgb_model = xgbst.XGBClassifier()
+            xgb_model.load_model(
+                os.path.join(
+                    os.path.dirname(aacolib.__file__),
+                    "_saved_models",
+                    "fashion-16x16_xgb_classifier_arb_subsets.json",
+                )
+            )
+            return aacolib.classifier.classifier_xgb(xgb_model)
         elif dataset_name == "big5_C_cls":
             # Load XGBoost model for MNIST dataset
             xgb_model = xgbst.XGBClassifier()
@@ -161,6 +172,7 @@ def aaco_runtime(aaco_run_p: str, n_instances: int, plf: pl.Fabric):
             "cube_20_0.3",
             "mnist",
             "fashion-mnist",
+            "fashion-mnist-16x16",
             "big5_C_cls",
             "volvo",
             "charfont-1500",
