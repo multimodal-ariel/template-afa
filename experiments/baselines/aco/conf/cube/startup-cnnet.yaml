@@ -1,6 +1,6 @@
 hydra:
   job:
-    name: cube
+    name: cube-cnnet
   sweep:
     dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
     subdir: ${hydra.job.num}
@@ -9,7 +9,7 @@ hydra:
 
 data:
   _target_: mydatasets.aaco.load_aaco_data
-  name: cube_20_0.3
+  name: cube_20_0.3-nnet
   to_normalize: false
 bsz: 1024
 init_fidx: 6
