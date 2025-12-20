@@ -13,6 +13,7 @@ import sklearn.preprocessing as skl_preproc
 import sklearn.tree as skl_tree
 import torch as th
 import tqdm.auto as tqdm
+import xgboost as xgbst
 from omegaconf import OmegaConf
 
 
@@ -268,6 +269,31 @@ class EngineFaultXGBClassifier(mymodels.classifiers.SubsetFeatureConcatXGBClassi
         )
         # (n, n_labels)
         pyhats = th.mean(pyhats, dim=1).to(device=device)
+        return pyhats
+
+    def __getitem__(self, key: tuple[int, ...]) -> None:
+        return None
+
+
+class FashionMNIST16x16XGBClassifier(
+    mymodels.classifiers.SubsetFeatureClassifier[None]
+):
+    def __init__(
+        self,
+        xs_train: np.ndarray[tuple[Any, ...], np.dtype[Any]],
+        ys_train: np.ndarray[tuple[Any, ...], np.dtype[Any]],
+        model_p: str,
+    ):
+        super().__init__(n_experts_per_act=1, xs_train=xs_train, ys_train=ys_train)
+        self.model = xgbst.XGBClassifier(n_jobs=-1)
+        self.model.load_model(model_p)
+
+    def predict_proba(self, ctxs: th.Tensor, acts: th.Tensor) -> th.Tensor:
+        pyhats: th.Tensor = th.as_tensor(
+            self.model.predict_proba(th.cat((ctxs, acts), dim=1).numpy(force=True)),
+            dtype=th.float32,
+            device=ctxs.device,
+        )
         return pyhats
 
     def __getitem__(self, key: tuple[int, ...]) -> None:
