@@ -175,9 +175,9 @@ def _make_concat_nnet_classifier_from_pretrain_run(
 class CubeNeuralNetClassifier:
 
     def __init__(self):
-        tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("fashion-mnist-16x16")
+        tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data("cube_20_0.3")
         self.nnet = _make_concat_nnet_classifier_from_pretrain_run(
-            run_p="periments/pretrain/nnet-random-subset/outputs/cube/20251211_214511",
+            run_p="experiments/pretrain/nnet-random-subset/outputs/cube/20251211_214511",
             xs_train=tdata["xs"],
             ys_train=tdata["ys"],
             fit_kwargs={
