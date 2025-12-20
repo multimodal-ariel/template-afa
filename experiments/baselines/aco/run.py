@@ -19,6 +19,11 @@ import torchmetrics as thm
 import tqdm.auto as tqdm
 import xgboost as xgbst
 from hydra.core.hydra_config import HydraConfig
+from omegaconf import OmegaConf
+
+OmegaConf.register_new_resolver(
+    name="get_cls", resolver=lambda cls: hd.utils.get_class(cls)
+)
 
 
 @dataclass
