@@ -36,31 +36,49 @@ _vdata = thv.datasets.FashionMNIST(
 )
 
 # %%
-_tmpdata: thd.TensorDict = thd.make_tensordict(
-    {
-        "xs": _tdata.data.flatten(1, 2).to(dtype=th.float32),
-        "ys": _tdata.targets.flatten(),
-    },
-    batch_size=(len(_tdata),),
+tdata = thd.cat(
+    [
+        thd.make_tensordict(
+            {"xs": _x[:, 0, :, :].flatten(1, 2), "ys": th.as_tensor(_y)},
+            batch_size=(len(_x),),
+        )
+        for _x, _y in th_data.DataLoader(
+            _tdata,
+            batch_size=36,
+            shuffle=False,
+            drop_last=False,
+            num_workers=36,
+        )
+    ],
+    dim=0,
 )
-vdata: thd.TensorDict = thd.make_tensordict(
-    {
-        "xs": _vdata.data.flatten(1, 2).to(dtype=th.float32),
-        "ys": _vdata.targets.flatten(),
-    },
-    batch_size=(len(_vdata),),
+_tmpdata = thd.cat(
+    [
+        thd.make_tensordict(
+            {"xs": _x[:, 0, :, :].flatten(1, 2), "ys": th.as_tensor(_y)},
+            batch_size=(len(_x),),
+        )
+        for _x, _y in th_data.DataLoader(
+            _vdata,
+            batch_size=36,
+            shuffle=False,
+            drop_last=False,
+            num_workers=8,
+        )
+    ],
+    dim=0,
 )
 
 # %%
-_tidxs, _tstidxs = [
+_vidxs, _tstidxs = [
     th.as_tensor(_d.indices, dtype=th.long)
     for _d in th_data.random_split(
         th_data.TensorDataset(th.arange(0, len(_tmpdata), dtype=th.long)),
-        lengths=(50_000, 10_000),
+        lengths=(0.5, 0.5),
         generator=th.Generator().manual_seed(279),
     )
 ]
-tdata, tstdata = _tmpdata[_tidxs], _tmpdata[_tstidxs]
+vdata, tstdata = _tmpdata[_vidxs], _tmpdata[_tstidxs]
 
 # %%
 with open(
@@ -79,7 +97,5 @@ with open(
         },
         f,
     )
-
-# %%
 
 # %%
