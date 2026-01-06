@@ -14,7 +14,7 @@ data:
   to_normalize: true
 tclassifier:
   _target_: _classifiers.make_concat_nnet_classifier_from_pretrain_run
-  run_p: experiments/pretrain/nnet-random-subset/outputs/fashion-16x16/20251213_003012
+  run_p: experiments/pretrain/nnet-random-subset/outputs/fashion-16x16/20260102_131953
   fit_kwargs:
     opt_type: "${get_cls: torch.optim.Adam}"
     opt_kwargs:
