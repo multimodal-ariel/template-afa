@@ -45,6 +45,8 @@ def load_classifier(dataset_name, X_train, y_train, input_dim):
         )
     elif dataset_name == "cube_20_0.3-nnet":
         return aacolib.classifier.CubeNeuralNetClassifier()
+    elif dataset_name == "engine-fault":
+        return aacolib.classifier.EngineFaultDecisionTreeClassifier()
     elif dataset_name == "grid_data" or dataset_name == "gas":
         # Use XGB dictionary classifier for Grid and Gas10 datasets
         return aacolib.classifier.classifier_xgb_dict(
@@ -171,6 +173,7 @@ def load_mask_generator(dataset_name, input_dim):
         "volvo",
         "charfont-1500",
         "ct-slice-rel-loc",
+        "engine-fault",
     ]:
         return aacolib.mask_generator.random_mask_generator(10000, input_dim, 1000)
     elif dataset_name == "grid_data" or dataset_name == "gas":
