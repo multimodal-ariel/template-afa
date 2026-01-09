@@ -8,24 +8,45 @@ class SurrogateClassifier(nn.Module):
     """
     Differentiable classifier
     """
-    def __init__(self, input_dim, n_classes, hidden_dim=256):
+    def __init__(self, input_dim, n_classes, hidden_dim=256, dataset_name=''):
         super().__init__()
         # x_o + mask
-        self.net = nn.Sequential(
-            nn.Linear(input_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, n_classes)
-        )
+        if dataset_name == 'cube':
+            self.net = nn.Sequential(
+                nn.Linear(input_dim * 2, n_classes),
+            )
+        elif dataset_name == 'fashionfull': 
+            self.net = nn.Sequential(
+                nn.Linear(input_dim * 2, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                
+                nn.Linear(hidden_dim, n_classes)
+            )
+        else:
+            self.net = nn.Sequential(
+                nn.Linear(input_dim * 2, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, n_classes)
+            )
 
     def forward(self, x, mask):
         masked_input = torch.cat([x * mask, mask], dim=-1)
         return self.net(masked_input) 
-
     
+        
 class TemplatePolicy(nn.Module):
-    def __init__(self, templates, surrogate_clf, input_dim, start_dim, hidden_dim=256, temp=2.0, optimize_templates=False):
+    def __init__(self, templates, surrogate_clf, input_dim, start_dim, hidden_dim=256, temp=2.0, optimize_templates=False, dataset_name=''):
         super().__init__()
         self.surrogate = surrogate_clf
         self.M, self.d = templates.shape
@@ -43,13 +64,34 @@ class TemplatePolicy(nn.Module):
         self.register_buffer("keep_mask", torch.ones(self.M))
         
         # Policy Network
-        self.net = nn.Sequential(
-            nn.Linear(input_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, self.M) 
-        )
+        if dataset_name == 'cube':
+            self.net = nn.Sequential(
+                nn.Linear(input_dim * 2, self.M),
+            )
+        elif dataset_name == 'fashionfull': 
+            self.net = nn.Sequential(
+                nn.Linear(input_dim * 2, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                
+                nn.Linear(hidden_dim, self.M)
+            )
+        else:
+            self.net = nn.Sequential(
+                nn.Linear(input_dim * 2, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, self.M)
+            )
         
         if self.optimize_templates:
             # soft init

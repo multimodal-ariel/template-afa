@@ -14,7 +14,7 @@ import tensordict as thd
 import copy
 import csv
 import time
-
+import re
 
 from diff_models_original import SurrogateClassifier, TemplatePolicy
 
@@ -34,6 +34,7 @@ print("*** PROJ_ROOT:", PROJ_ROOT)
 args = parse_args()
 _dataset_name = args.dataset
 
+    
 # get configs for dataset
 if _dataset_name == "mnist":
     mktmpl_run_dir = f"experiments/make_template/outputs/mnist_cnnet/20250326_003820/0"
@@ -44,9 +45,13 @@ elif _dataset_name == "grid":
 elif _dataset_name == "gas":
     mktmpl_run_dir = f"experiments/make_template/outputs/gas_cnnet/20250324_224734/0"
 elif _dataset_name == "cube":
-    mktmpl_run_dir = f"experiments/make_template/outputs/cube/20250318_225416/0"
+    mktmpl_run_dir = f"experiments/make_template/outputs/cube/20260105_232445/0"
+elif _dataset_name == "fashionfull":
+    mktmpl_run_dir = f"experiments/make_template/outputs/fashion_cnnet/20251120_232234/0"
 elif _dataset_name == "fashion":
-    mktmpl_run_dir = f"experiments/make_template/outputs/fashion_cnnet/20250326_003859/0"
+    mktmpl_run_dir = f"experiments/make_template/outputs/fashion-16x16_cnnet/20260102_202634/0"
+elif _dataset_name == "engine":
+    mktmpl_run_dir = f"experiments/make_template/outputs/engine/20251201_113946/0"
 else:
     raise ValueError(f"Unknown dataset: {_dataset_name}")
 
@@ -162,8 +167,10 @@ def evaluate_policy(policy, x, y, start_dim, alpha, batch_size=1024, max_steps_e
 
 # load checkpoint
 print("\n--- Initializing Model Architecture ---")
-hidden_size = {"mnist": 512,"big5": 256, "grid": 256, "gas": 256, "cube": 256, "fashion": 512}[args.dataset]
-surrogate = SurrogateClassifier(n_covs, n_labels, hidden_dim=hidden_size).to(device)
+hidden_size = {"mnist": 512,"big5": 256, "grid": 256, "gas": 256, "cube": 256, "fashion": 512, "engine":256}[args.dataset]
+
+
+surrogate = SurrogateClassifier(n_covs, n_labels, hidden_dim=hidden_size, dataset_name=args.dataset).to(device)
 
 # Resolve model path
 model_path = os.path.join(args.model_path)
@@ -171,9 +178,29 @@ model_path = os.path.join(args.model_path)
 print(f"Loading model weights from: {model_path}")
 state_dict = torch.load(model_path, map_location=device)
 
-policy = TemplatePolicy(tmpls, surrogate, n_covs, start_dim, hidden_dim=hidden_size, optimize_templates=True).to(device)
+if 'template_logits' in state_dict:
+    checkpoint_n_templates = state_dict['template_logits'].shape[0]
+    current_n_templates = tmpls.shape[0]
+    
+    if current_n_templates != checkpoint_n_templates:
+        if current_n_templates > checkpoint_n_templates:
+            tmpls = tmpls[:checkpoint_n_templates]
+            
+        else:
+            diff = checkpoint_n_templates - current_n_templates
+            padding = torch.randn(diff, n_covs, device=device)
+            tmpls = torch.cat([tmpls, padding], dim=0)
 
-# Load weights
+policy = TemplatePolicy(
+    tmpls, 
+    surrogate, 
+    n_covs, 
+    start_dim, 
+    hidden_dim=hidden_size, 
+    optimize_templates=True, 
+    dataset_name=args.dataset
+).to(device)
+
 policy.load_state_dict(state_dict)
 policy.eval()
 print("Model loaded successfully.")
@@ -216,9 +243,24 @@ os.makedirs(save_dir, exist_ok=True)
 exp_name = "final"
 saved_path = os.path.join(save_dir, f"timing_{exp_name}_{_dataset_name}.csv")
 
-with open(saved_path, mode='a', newline='') as f:
-    writer = csv.writer(f)
-    if f.tell() == 0:
-        writer.writerow(header)
+new_row_str = [str(x) for x in row]
+duplicate_found = False
+
+if os.path.exists(saved_path):
+    with open(saved_path, mode='r', newline='') as f_read:
+        reader = csv.reader(f_read)
+        for existing_row in reader:
+            if existing_row == new_row_str:
+                duplicate_found = True
+                break
+
+if not duplicate_found:
+    with open(saved_path, mode='a', newline='') as f:
+        writer = csv.writer(f)
+        if f.tell() == 0:
+            writer.writerow(header)
         
-    writer.writerow(row)
+        writer.writerow(row)
+    print("Data appended successfully.")
+else:
+    print("Duplicate data found. Skipping.")
