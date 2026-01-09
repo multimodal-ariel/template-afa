@@ -1,11 +1,13 @@
 import os
-from typing import TYPE_CHECKING
+from typing import Any
 
 import hydra as hd
 import mydatasets
 import mylib
 import mymodels
 import numpy as np
+import sklearn.preprocessing as skl_preproc
+import sklearn.tree as skl_tree
 import torch as th
 from omegaconf import OmegaConf
 from scipy.stats import norm
@@ -191,3 +193,81 @@ class CubeNeuralNetClassifier:
 
     def __call__(self, X, idx):
         return self.nnet.predict_proba(*th.chunk(X, chunks=2, dim=1))
+
+
+class EngineFaultDecisionTreeClassifier(
+    mymodels.classifiers.SubsetFeatureClassifier[skl_tree.DecisionTreeClassifier]
+):
+    dtc_kwargs: dict[str, Any]
+    stdsclr: skl_preproc.StandardScaler
+
+    _inv_txs: np.ndarray
+
+    def __init__(self):
+        tdata, vdata, tstdata = mydatasets.aaco.load_aaco_data(
+            "engine-fault", to_normalize=True
+        )
+        super().__init__(
+            n_experts_per_act=1,
+            xs_train=tdata["xs"].numpy(force=True),
+            ys_train=tdata["ys"].numpy(force=True),
+        )
+        self.dtc_kwargs = {
+            "max_depth": 8,
+            "splitter": "best",
+            "criterion": "log_loss",
+            "random_state": 279,
+        }
+        # engine fault dataset is loaded with normalized feature
+        # need a standard scaler on training data to invert things back
+        self.stdsclr = skl_preproc.StandardScaler(copy=True).fit(
+            mydatasets.aaco.load_aaco_data("engine-fault", to_normalize=False)[0][
+                "xs"
+            ].numpy(force=True)
+        )  # type:ignore
+        self._inv_txs = self.stdsclr.inverse_transform(self.xs_train)
+
+    def forward(self, X, idx):
+        return self.predict_proba(*th.chunk(X, chunks=2, dim=1))
+
+    def predict_proba(self, ctxs: th.Tensor, acts: th.Tensor) -> th.Tensor:
+        ctxs = th.as_tensor(
+            self.stdsclr.inverse_transform(ctxs.numpy(force=True)),
+            dtype=th.float32,
+            device=ctxs.device,
+        )
+        n: int = len(ctxs)
+        n_labels: int = self.n_labels
+        acts = acts.to(dtype=th.long)
+        acts_l: list[tuple[int, ...]] = [tuple(a.tolist()) for a in acts]
+        pyhats: th.Tensor = th.empty((n, n_labels), dtype=th.float32)
+        for act in set(acts_l):
+            _act: th.Tensor = th.as_tensor([act], dtype=th.long, device=acts.device)
+            _curr_idxs: th.Tensor = th.argwhere(th.all(acts == _act, dim=1)).flatten()
+            _ctxs: th.Tensor = ctxs[_curr_idxs]
+            pyhats[_curr_idxs] = self._predict_proba_same_act(_ctxs, act)
+        return pyhats
+
+    def _predict_proba_same_act(
+        self, ctxs: th.Tensor, act: tuple[int, ...]
+    ) -> th.Tensor:
+        classifier = self[act]
+        ctxs_: np.ndarray = ctxs.numpy(force=True)
+        fcomb: tuple[int, ...] = self.act_to_fcomb_exidx(act)[0]
+        pyhats_n: np.ndarray = classifier.predict_proba(ctxs_[:, fcomb])  # type:ignore
+        pyhats: th.Tensor = th.as_tensor(pyhats_n, dtype=th.float32)
+        return pyhats
+
+    def __getitem__(self, key: tuple[int, ...]) -> skl_tree.DecisionTreeClassifier:
+        assert self.n_experts_per_act == 1
+        assert len(key) == self.n_covs
+        if key in self._act_to_classifier:
+            return self._act_to_classifier[key]
+        act: tuple[int, ...] = key
+        fcomb: tuple[int, ...] = self.act_to_fcomb_exidx(act)[0]
+        model = skl_tree.DecisionTreeClassifier(**self.dtc_kwargs)
+        xs: np.ndarray = self._inv_txs[:, fcomb].astype(np.float32)
+        ys: np.ndarray = self.ys_train.astype(np.int64)
+        model.fit(xs, ys)
+        self._act_to_classifier[key] = model
+        return model
