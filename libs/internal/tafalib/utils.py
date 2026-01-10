@@ -4,9 +4,7 @@ import itertools as itrtls
 from typing import Callable
 
 import lightning as pl
-import mymodels.classifiers
-import mymodels.nn
-import mymodels.protocols
+import mymodels
 import tensordict as thd
 import torch as th
 import torchmetrics as thm
@@ -270,7 +268,9 @@ def evaluate(
     pyhats_l: list[th.Tensor] = list()
     fms: th.Tensor = th.zeros((len(data), data["xs"].shape[1]), dtype=th.long)
     metrics_func.reset()
-    for _i, _data in enumerate(data):
+    for _i, _data in tqdm.tqdm(
+        enumerate(data), desc="eval", total=len(data), dynamic_ncols=True
+    ):
         _pyhat, _fobsd_l, _fcomb = run_one_episode_all_obsd(
             x=_data["xs"],
             classifier=classifier,
