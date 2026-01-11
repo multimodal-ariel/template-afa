@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools as itrtls
+import time
 from typing import Callable
 
 import lightning as pl
@@ -268,8 +269,9 @@ def evaluate(
     pyhats_l: list[th.Tensor] = list()
     fms: th.Tensor = th.zeros((len(data), data["xs"].shape[1]), dtype=th.long)
     metrics_func.reset()
+    start_time_ns: int = time.time_ns()
     for _i, _data in tqdm.tqdm(
-        enumerate(data), desc="eval", total=len(data), dynamic_ncols=True
+        enumerate(data), desc="eval", total=len(data), dynamic_ncols=True, leave=False
     ):
         _pyhat, _fobsd_l, _fcomb = run_one_episode_all_obsd(
             x=_data["xs"],
@@ -286,6 +288,7 @@ def evaluate(
         metrics_func.update(
             _pyhat[None, :].to(device="cpu"), _data["ys"][None].to(device="cpu")
         )
+    end_time_ns: int = time.time_ns()
     pyhats: th.Tensor = th.cat(pyhats_l, dim=0)
     cels: th.Tensor = th.nn.functional.cross_entropy(
         pyhats, data["ys"], reduction="none"
@@ -303,6 +306,8 @@ def evaluate(
                 th.as_tensor(snfobsd_l, dtype=th.float32)
             ).item(),
             "feature used": th.mean(th.as_tensor(snfcomb_l, dtype=th.float32)).item(),
+            "inference_time_ns": end_time_ns - start_time_ns,
+            "avg_pred_time_ns": (end_time_ns - start_time_ns) / len(data),
         }
     )
     return metrics_d
