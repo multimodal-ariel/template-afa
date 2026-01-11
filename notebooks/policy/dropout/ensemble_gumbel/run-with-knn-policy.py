@@ -52,6 +52,7 @@ def load_from_ckpt(
         "fashion-mnist-16x16": "fashion",
         "grid_data": "grid",
         "gas": "gas",
+        "mnist": "mnist",
     }
     hidden_size_d = {
         "mnist": 512,
