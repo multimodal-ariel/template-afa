@@ -13,30 +13,16 @@ data:
   _target_: mydatasets.aaco.load_aaco_data
   name: engine-fault
   to_normalize: true
-n_masks: 1700
+n_masks: 50
 nnet:
-  _target_: mymodels.nn.make_fcn
-  layer_specs: [
-      [
-        128,
-        "${get_cls: torch.nn.LazyBatchNorm1d}",
-        "${get_cls: torch.nn.ELU}",
-        null,
-      ], # two layers
-      [
-        64,
-        "${get_cls: torch.nn.LazyBatchNorm1d}",
-        "${get_cls: torch.nn.ELU}",
-        null,
-      ], # two layers
-    ]
+  _target_: torch.nn.Linear
 nnet_fit_cfg:
   opt_type: "${get_cls: torch.optim.AdamW}"
   opt_kwargs:
     lr: 1e-3
     amsgrad: true
   n_iter_warmup: 10
-  n_iter: 3_000
+  n_iter: 25_000
   bsz: 12400
   eval_every_n_iter: 20
 plf:
