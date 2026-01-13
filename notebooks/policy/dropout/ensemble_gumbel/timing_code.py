@@ -39,7 +39,7 @@ _dataset_name = args.dataset
 if _dataset_name == "mnist":
     mktmpl_run_dir = f"experiments/make_template/outputs/mnist_cnnet/20250326_003820/0"
 elif _dataset_name == "big5":
-    mktmpl_run_dir = f"experiments/make_template/outputs/big5_cnnet/20250318_144121/0"
+    mktmpl_run_dir = f"experiments/make_template/outputs/big5_cnnet/20251213_024429/0"
 elif _dataset_name == "grid":
     mktmpl_run_dir = f"experiments/make_template/outputs/grid_cnnet/20250325_213622/0"
 elif _dataset_name == "gas":
