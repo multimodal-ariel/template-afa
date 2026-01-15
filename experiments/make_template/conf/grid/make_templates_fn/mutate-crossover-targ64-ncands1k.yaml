@@ -1,0 +1,11 @@
+_target_: tafalib.makers.templates.make_templates_mutate_crossover
+max_tdata: null
+n_tmpls_targ: 64
+n_cands_init: 1_000
+n_cands_mutate: 128
+n_cands_targ: 1_000
+min_features: 1
+max_features: null
+n_rounds: 10
+use_feature_importance_sampling: true
+to_update_classifier: false
