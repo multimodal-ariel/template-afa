@@ -620,6 +620,233 @@ def make_templates_fix_rounds(
     return tmpls
 
 
+@th.no_grad()
+def make_templates_mutate_crossover(
+    tdata: thd.TensorDict,
+    max_tdata: Optional[int],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    to_update_classifier: bool,
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
+    n_tmpls_targ: int,
+    n_cands_init: int,
+    n_cands_mutate: int | None,
+    n_cands_targ: int | None,
+    min_features: int,
+    max_features: Optional[int],
+    n_rounds: int,
+    use_feature_importance_sampling: bool,
+    lmbda: float,
+    bsz: int,
+    plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
+) -> th.Tensor:
+    """Make templates using hybrid mutation and crossover greedy search.
+
+    This function implements an evolutionary-inspired template generation algorithm that combines
+    both mutation and crossover operations to create diverse, high-quality feature templates.
+    Unlike purely mutation-based approaches, this method introduces genetic diversity through
+    crossover operations that combine features from multiple parent templates.
+
+    The algorithm iteratively evolves templates through multiple rounds:
+    1. Initial candidate pool generation (random or based on init_fidx)
+    2. For subsequent rounds:
+       - Crossover: Generate new candidates by combining pairs of selected templates
+       - Mutation: Generate variants by removing features from existing templates
+       - Random generation: Fill remaining candidate slots with random templates
+    3. Evaluate all candidates and select the best performing templates
+    4. Repeat until convergence or maximum rounds reached
+
+    The crossover operation uses a "no drop features" strategy where child templates
+    contain the union of features from both parents, ensuring that useful feature
+    combinations are preserved and extended rather than lost.
+
+    Args:
+        tdata (thd.TensorDict): (n, ) training data containing 'xs' (features) and 'ys' (labels)
+        max_tdata (Optional[int]): Maximum number of training samples to use per round.
+            If None or larger than dataset size, uses all data.
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): Classifier for evaluating
+            template performance and computing rewards.
+        to_update_classifier (bool): Whether to update/refit the classifier when new
+            template collections are generated. Useful for adaptive classifiers.
+        init_fidx (Optional[int | _PostHocIdentifyInitialFeatureFunc]): Initial feature
+            handling. If int, that feature index is always included. If function,
+            determines initial feature post-hoc. If None, no initial feature constraint.
+        n_tmpls_targ (int): Target number of templates to return in final collection.
+        n_cands_init (int): Size of initial candidate pool for first round.
+        n_cands_mutate (int | None): Number of candidates to generate from mutation/crossover
+            operations in subsequent rounds. If None, defaults to n_tmpls_targ.
+        n_cands_targ (int | None): Total target number of candidates per round after
+            initial round. If None, defaults to 5 * n_tmpls_targ.
+        min_features (int): Minimum number of features required in each template.
+            Must be greater than 1.
+        max_features (Optional[int]): Maximum features per template. If None, uses
+            total number of features (n_covs).
+        n_rounds (int): Number of evolutionary rounds to perform.
+        use_feature_importance_sampling (bool): Whether to bias random template generation
+            towards features that appeared frequently in previously selected templates.
+        lmbda (float): Regularization parameter penalizing templates with more features.
+            Higher values encourage sparsity.
+        bsz (int): Batch size for candidate evaluation.
+        plf (pl.Fabric): PyTorch Lightning Fabric instance for device management and logging.
+        generator (Optional[th.Generator]): Random number generator for reproducibility.
+            If None, uses default generator.
+
+    Returns:
+        th.Tensor: (n_tmpls_targ, n_covs) Collection of optimized binary feature templates.
+            Each row represents a template, with 1s indicating selected features.
+
+    Algorithm Details:
+        - **Crossover Strategy**: Combines parent templates using union operation (no feature loss)
+        - **Mutation Strategy**: Removes single features from existing templates
+        - **Selection Pressure**: Greedy selection based on classification performance
+        - **Diversity Maintenance**: Random template injection and crossover operations
+        - **Adaptive Sampling**: Optional feature importance-based sampling for diversity
+
+    Example:
+        ```python
+        # Generate templates using mutation and crossover
+        templates = make_templates_mutate_crossover(
+            tdata=training_data,
+            max_tdata=1000,
+            classifier=my_classifier,
+            to_update_classifier=True,
+            init_fidx=0,              # Always include feature 0
+            n_tmpls_targ=10,         # Generate 10 final templates
+            n_cands_init=100,        # Start with 100 candidates
+            n_cands_mutate=50,       # 50 mutation/crossover candidates per round
+            n_cands_targ=200,        # 200 total candidates per round
+            min_features=3,
+            max_features=15,
+            n_rounds=5,              # 5 evolutionary rounds
+            use_feature_importance_sampling=True,
+            lmbda=0.1,
+            bsz=32,
+            plf=fabric
+        )
+        ```
+
+    Notes:
+        - The crossover operation preserves all features from both parents, making it
+          particularly suitable when feature combinations are valuable.
+        - Post-hoc initial feature identification is performed if init_fidx is a function.
+        - Performance logging includes metrics for each evolutionary round.
+        - The algorithm balances exploitation (mutation of good templates) with
+          exploration (crossover and random generation).
+    """
+    generator = th.default_generator if generator is None else generator
+    classifier.eval().to(device=plf.device)
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    ctmpls: th.Tensor | None = None
+    tmpls: th.Tensor | None = None
+    slctd_ms: th.Tensor | None = None
+    for _i in tqdm.trange(
+        n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
+    ):
+        if ctmpls is None or tmpls is None or slctd_ms is None:
+            # initialize candidate pool
+            ctmpls = (
+                tafalib_makers_candidates.make_template_candidates(
+                    n_covs=n_covs,
+                    init_fidx=init_fidx,
+                    n_cands_targ=n_cands_init,
+                    min_features=min_features,
+                    max_features=max_features,
+                    generator=generator,
+                )
+                if init_fidx is not None and isinstance(init_fidx, int)
+                else tafalib_makers_candidates.make_feature_masks(
+                    n_covs=n_covs,
+                    n_masks=n_cands_init,
+                    min_features=1,
+                    max_features=max_features,
+                    generator=generator,
+                )
+            )
+        else:
+            # update candidate pool from existing templates
+            ctmpls = _update_template_candidates_mutate_crossover_no_drop_feats(
+                ctmpls=ctmpls,
+                slctd_ms=slctd_ms,
+                init_fidx=init_fidx,
+                n_cands_init=n_cands_init,
+                n_cands_mutate=n_cands_mutate,
+                n_cands_targ=n_cands_targ,
+                min_features=min_features,
+                max_features=max_features,
+                use_feature_importance_sampling=use_feature_importance_sampling,
+                generator=generator,
+            )
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
+            classifier.fit_(ctmpls)
+        tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+            ctmpls,
+            data=(
+                tdata[
+                    th.multinomial(
+                        th.ones((len(tdata),)),
+                        num_samples=max_tdata,
+                        generator=generator,
+                    )
+                ]
+                if max_tdata is not None and max_tdata < len(tdata)
+                else tdata
+            ),
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )
+        tmpls, slctd_ms = make_templates_from_candidates(
+            tpcomp=tpcomp,
+            ctmpls=ctmpls,
+            n_tmpls=n_tmpls_targ,
+            plf=plf,
+            log_prefix=f"mutate-crossover{_i}",
+        )
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
+            classifier.fit_(tmpls)
+    assert tmpls is not None
+    tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls(
+        tmpls,
+        data=(
+            tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)),
+                    num_samples=max_tdata,
+                    generator=generator,
+                )
+            ]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        ),
+        classifier=classifier,
+        lmbda=lmbda,
+        bsz=bsz,
+        plf=plf,
+    ).auto_batch_size_(2)
+    if init_fidx is None:
+        init_fidx = post_hoc_count_based_identify_init_fidx
+    if not isinstance(init_fidx, int):
+        fidx = init_fidx(
+            tdata=tdata,
+            tmpls=tmpls,
+            tpcomp=tpcomp,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )[0]
+        tmpls[:, fidx] = 1
+    return tmpls
+
+
 def make_templates_fix_rounds_minibatch(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],
@@ -2303,6 +2530,194 @@ def _update_template_candidates_fix_rounds(
     for _i, _fc in enumerate(fcs_l):
         ctmpls_new[_i, _fc] = 1
     return ctmpls_new
+
+
+def _update_template_candidates_mutate_crossover_no_drop_feats(
+    ctmpls: th.Tensor,
+    slctd_ms: th.Tensor,
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
+    n_cands_init: int,
+    n_cands_mutate: int | None,
+    n_cands_targ: int | None,
+    min_features: int,
+    max_features: Optional[int],
+    use_feature_importance_sampling: bool,
+    generator: Optional[th.Generator],
+) -> th.Tensor:
+    """Update template candidate pool using hybrid crossover and mutation operations.
+
+    This function generates a new candidate pool by combining three strategies:
+    1. **Crossover**: Creates new templates by combining pairs of selected templates
+       using a feature-union approach (no features are dropped)
+    2. **Mutation**: Generates variants by removing features from existing templates
+    3. **Random Generation**: Fills remaining slots with randomly generated templates
+
+    The "no drop feats" crossover strategy ensures that beneficial feature combinations
+    are preserved and extended rather than lost, making it particularly effective when
+    feature synergies are important.
+
+    Args:
+        ctmpls (th.Tensor): (n_cands, n_covs) Collection of candidate templates from
+            the previous round.
+        slctd_ms (th.Tensor): (n_cands,) Boolean mask indicating which candidates
+            were selected in the previous round. Selected templates become parents
+            for crossover and mutation operations.
+        init_fidx (Optional[int | _PostHocIdentifyInitialFeatureFunc]): Initial feature
+            constraint. If int, that feature is always included in generated templates.
+            If function, used for post-hoc feature identification. If None, no constraint.
+        n_cands_init (int): Maximum size constraint for the candidate pool, used to
+            limit computational complexity.
+        n_cands_mutate (int | None): Target number of candidates to generate through
+            mutation and crossover operations. If None, defaults to the number of
+            selected templates.
+        n_cands_targ (int | None): Total target size for the candidate pool. If None,
+            defaults to 5 * n_selected_templates + n_mutation_candidates.
+        min_features (int): Minimum number of features required in each generated template.
+        max_features (Optional[int]): Maximum features per template. If None, uses
+            total number of available features.
+        use_feature_importance_sampling (bool): Whether to bias random template generation
+            towards features that were frequently selected in previous rounds.
+        generator (Optional[th.Generator]): Random number generator for reproducible
+            candidate generation.
+
+    Returns:
+        th.Tensor: (n_new_cands, n_covs) New collection of candidate templates combining
+            crossover offspring, mutation variants, and random templates.
+
+    Algorithm Details:
+        1. **Extract Parents**: Selected templates from previous round become parent pool
+        2. **Crossover Phase**:
+           - Generate n_cands_mutate // 2 crossover candidates
+           - Each child contains union of features from two random parents
+           - Preserves beneficial feature combinations
+        3. **Mutation Phase**:
+           - Apply mutation to combined parent + crossover pool
+           - Remove single features to create variants
+           - Ensures local exploration around good solutions
+        4. **Random Fill**:
+           - Generate additional random templates to reach target pool size
+           - Optional importance-based sampling for diversity
+        5. **Assembly**: Combine all candidates into unified pool
+
+    Example:
+        ```python
+        # Previous round had 100 candidates, 10 were selected
+        selected_mask = torch.zeros(100, dtype=torch.bool)
+        selected_mask[:10] = True
+
+        # Generate new candidate pool
+        new_candidates = _update_template_candidates_mutate_crossover_no_drop_feats(
+            ctmpls=previous_candidates,
+            slctd_ms=selected_mask,
+            init_fidx=0,
+            n_cands_init=200,
+            n_cands_mutate=20,      # 10 crossover + mutation operations
+            n_cands_targ=100,       # 100 total candidates
+            min_features=3,
+            max_features=10,
+            use_feature_importance_sampling=True,
+            generator=torch.Generator().manual_seed(42)
+        )
+        ```
+
+    Notes:
+        - The crossover operation uses `th.clamp(parent1 + parent2, 0, 1)` to create
+          feature unions, ensuring no useful features are lost.
+        - Mutation operations provide local refinement of promising solutions.
+        - Random template generation ensures population diversity and prevents
+          premature convergence.
+        - The function balances exploitation (crossover/mutation) with exploration
+          (random generation) for effective evolutionary search.
+    """
+    generator = th.default_generator if generator is None else generator
+    tmpls_prv: th.Tensor = ctmpls[slctd_ms]
+    n_cands_mutate = len(tmpls_prv) if n_cands_mutate is None else n_cands_mutate
+    tmpls_crv: th.Tensor = _crossover_tmpls_no_drop_feats(
+        tmpls_prv=tmpls_prv,
+        init_fidx=init_fidx,
+        n_cands_crossover=n_cands_mutate // 2,
+        generator=generator,
+    )
+    tmpls_prv = th.cat((tmpls_prv, tmpls_crv), dim=0)
+    fcs_set: set[tuple[int, ...]] = _mutate_tmpls(
+        tmpls_prv=tmpls_prv,
+        init_fidx=init_fidx,
+        n_cands_targ=min(n_cands_mutate + len(tmpls_prv), n_cands_init),
+        min_features=min_features,
+        generator=generator,
+    )
+    n_covs: int = ctmpls.shape[1]
+    n_cands_targ = (
+        5 * len(tmpls_prv) + len(fcs_set) if n_cands_targ is None else n_cands_targ
+    )
+    fcs_sets_by_bins: list[set[tuple[int, ...]]] = _fill_fcs_set_with_random_tmpls(
+        fcs_set=fcs_set,
+        n_covs=n_covs,
+        init_fidx=init_fidx,
+        n_cands_targ=min(n_cands_targ, n_cands_init),
+        min_features=min_features,
+        max_features=max_features,
+        prv_featcounts=(
+            th.sum(ctmpls[slctd_ms], dim=0) if use_feature_importance_sampling else None
+        ),
+        generator=generator,
+    )
+    # from fcomb to act
+    fcs_l: list[tuple[int, ...]] = [_fc for _fcs in fcs_sets_by_bins for _fc in _fcs]
+    n_cands: int = len(fcs_l)
+    ctmpls_new: th.Tensor = th.zeros((n_cands, n_covs), dtype=th.long)
+    for _i, _fc in enumerate(fcs_l):
+        ctmpls_new[_i, _fc] = 1
+    return ctmpls_new
+
+
+def _crossover_tmpls_no_drop_feats(
+    tmpls_prv: th.Tensor,
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
+    n_cands_crossover: int,
+    generator: Optional[th.Generator],
+) -> th.Tensor:
+    generator = th.default_generator if generator is None else generator
+    n_covs: int = tmpls_prv.shape[1]
+    # new candidate pool set
+    fcs_set: set[tuple[int, ...]] = {
+        tuple(th.argwhere(_tmpl == 1).flatten().tolist()) for _tmpl in tmpls_prv
+    }
+    # need at least 2 templates for crossover
+    if len(tmpls_prv) < 2:
+        return tmpls_prv.clone()
+    # crossover templates
+    fcs_set_crv: set[tuple[int, ...]] = set()
+    for _c in tqdm.trange(
+        n_cands_crossover * 10, desc="crossover", dynamic_ncols=True, leave=False
+    ):
+        if _c >= n_cands_crossover or len(fcs_set) >= n_cands_crossover:
+            break
+        # randomly choose two different existing templates for crossover
+        _parent_indices: th.Tensor = th.multinomial(
+            th.ones(len(tmpls_prv), dtype=th.float64),
+            2,  # sample 2 different templates
+            replacement=False,
+            generator=generator,
+        )
+        _parent1: th.Tensor = tmpls_prv[_parent_indices[0]]
+        _parent2: th.Tensor = tmpls_prv[_parent_indices[1]]
+        # sum the two parent templates
+        _child: th.Tensor = th.clamp(_parent1 + _parent2, 0, 1)
+        # ensure initial feature is preserved
+        if init_fidx is not None and isinstance(init_fidx, int):
+            _child[init_fidx] = 1
+        # add child to candidate pool
+        _fc: tuple[int, ...] = tuple(th.argwhere(_child == 1).flatten().tolist())
+        if _fc not in fcs_set and _fc not in fcs_set_crv:
+            fcs_set_crv.add(_fc)
+    # from fcomb to tensor
+    tmpls_crv: th.Tensor = th.zeros(
+        (len(fcs_set_crv), n_covs), dtype=th.long, device=tmpls_prv.device
+    )
+    for _i, _fc in enumerate(fcs_set_crv):
+        tmpls_crv[_i, _fc] = 1
+    return tmpls_crv
 
 
 def _mutate_tmpls(
