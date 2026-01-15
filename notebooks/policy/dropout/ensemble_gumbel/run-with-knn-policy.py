@@ -32,6 +32,7 @@ class MainConf:
     ckpt_cfg: CkptConf
     n_neighs: int
     bsz: int
+    n_instances: int
     plf: Any
 
 
@@ -201,7 +202,17 @@ def main(cfg: MainConf):
         )
         th.save(tpcomp, os.path.join(_run_p, "tpcomp.pt"))
         metrics_d: dict[str, float] = tafalib.utils.evaluate(
-            data=vdata,
+            data=(
+                vdata
+                if (not hasattr(cfg, "n_instances")) or cfg.n_instances is None
+                else vdata[
+                    th.multinomial(
+                        th.ones(len(vdata)),
+                        min(cfg.n_instances, len(vdata)),
+                        replacement=False,
+                    )
+                ]
+            ),
             classifier=_classifier,
             cost_est=lambda x: tafalib.functional.knn_cost_est(
                 x,
