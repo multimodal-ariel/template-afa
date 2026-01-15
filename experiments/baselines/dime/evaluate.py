@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import traceback
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -121,9 +122,11 @@ def main(cfg: MainConf):
         logger=False,
         plugins=[pl_plugins_envs.LightningEnvironment()],
     )
+    start_time_ns: int = time.time_ns()
     inference_out: dict[str, th.Tensor] = cmi_module.inference(
         trainer, vloader, feature_costs=None, lam=cfg.lmbda
     )
+    end_time_ns: int = time.time_ns()
     # log metrics
     tfb_logger = plf_loggers.TensorBoardLogger(root_dir=output_dir, name="", version="")  # type: ignore
     csv_logger = plf_loggers.CSVLogger(root_dir=output_dir, name="", version="")  # type: ignore
@@ -144,6 +147,8 @@ def main(cfg: MainConf):
         k: v.item() for k, v in metrics_func.compute().items()
     }
     metrics_d["feature observed"] = th.mean(th.sum(inference_out["mask"], dim=1)).item()
+    metrics_d["inference_time_ns"] = end_time_ns - start_time_ns
+    metrics_d["avg_pred_time_ns"] = (end_time_ns - start_time_ns) / len(vdata)
     metrics_func.reset()
     tfb_logger.log_metrics(mylib.utils.add_prefix_to_dict(metrics_d, "eval"), step=0)
     csv_logger.log_metrics(mylib.utils.add_prefix_to_dict(metrics_d, "eval"), step=0)
