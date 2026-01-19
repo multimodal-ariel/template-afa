@@ -1,0 +1,11 @@
+_target_: tafalib.makers.templates.make_templates_fix_rounds
+max_tdata: null
+n_tmpls_targ: 10
+n_cands_init: 1_000_000
+n_cands_mutate: 1024
+n_cands_targ: 1_000_000
+min_features: 3
+max_features: 6
+n_rounds: 3
+use_feature_importance_sampling: false
+to_update_classifier: false
