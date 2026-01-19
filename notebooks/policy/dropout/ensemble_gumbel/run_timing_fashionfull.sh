@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DATASETS=("cube" "grid" "mnist" "gas" "fashionfull" "fashion" "engine" "big5") # 
+DATASETS=("fashionfull") # 
 
 GPU_ID=0
 BASE_DIR="share"
