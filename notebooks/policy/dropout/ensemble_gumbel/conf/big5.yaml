@@ -1,0 +1,22 @@
+hydra:
+  job:
+    name: big5
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  # launcher:
+  #   n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: big5_C_cls
+  to_normalize: true
+lmbda_csv_p: notebooks/policy/dropout/ensemble_gumbel/lmbda/big5_alpha.csv
+ckpt_cfg:
+  dir: notebooks/policy/dropout/ensemble_gumbel/share/big5
+  file_stub: "policy_diff_final_big5_{}_rollout.pt"
+n_neighs: 10
+bsz: 1024
+plf:
+  _target_: lightning.Fabric
+  accelerator: auto

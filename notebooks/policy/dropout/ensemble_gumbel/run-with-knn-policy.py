@@ -48,7 +48,7 @@ def load_from_ckpt(
     data_name_d = {
         "big5_C_cls": "big5",
         "cube_20_0.3": "cube",
-        "engine-fualt": "engine",
+        "engine-fault": "engine",
         "fashion-mnist": "fashionfull",
         "fashion-mnist-16x16": "fashion",
         "grid_data": "grid",
@@ -61,8 +61,9 @@ def load_from_ckpt(
         "grid": 256,
         "gas": 256,
         "cube": 256,
+        "fashionfull": 512,
         "fashion": 512,
-        "engine": 256,
+        "engine": 128,
     }
     state_dict = th.load(ckpt_p, weights_only=False, map_location="cpu")
     _tmp = dict(
