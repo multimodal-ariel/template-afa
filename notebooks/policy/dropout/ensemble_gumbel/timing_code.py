@@ -204,7 +204,7 @@ hidden_size = {
     "cube": 256,
     "fashion": 512,
     "fashionfull": 512,
-    "engine": 256,
+    "engine": 128,
 }[args.dataset]
 
 

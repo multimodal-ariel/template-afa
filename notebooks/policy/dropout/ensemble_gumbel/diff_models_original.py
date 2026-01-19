@@ -97,6 +97,13 @@ class TemplatePolicy(nn.Module):
                 nn.ReLU(),
                 nn.Linear(hidden_dim, self.M),
             )
+        elif dataset_name == "engine":
+            self.net = nn.Sequential(
+                nn.Linear(input_dim * 2, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, self.M),
+            )
         else:
             self.net = nn.Sequential(
                 nn.Linear(input_dim * 2, hidden_dim),
