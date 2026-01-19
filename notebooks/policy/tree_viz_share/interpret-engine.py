@@ -7,9 +7,11 @@ from collections import defaultdict
 
 import hydra as hd
 import joblib
+import mydatasets
 import mylib
 import numpy as np
 import pandas as pd
+import sklearn.preprocessing as skl_preproc
 import torch as th
 import tqdm.auto as tqdm
 from omegaconf import OmegaConf
@@ -22,8 +24,8 @@ ENGINE_FEATURE_NAMES = [
     "Force",
     "Power",
     "RPM",
-    "Consumption L/H",
-    "Consumption L/100KM",
+    "fuel consumption[l/hr]",
+    "fuel consumption[l/100km]",
     "Speed",
     "CO",
     "HC",
@@ -32,6 +34,28 @@ ENGINE_FEATURE_NAMES = [
     "Lambda",
     "AFR",
 ]
+ENGINE_FEATURE_UNITS = {
+    "MAP": "kPa",
+    "TPS": "%",
+    "Force": "N",
+    "Power": "kW",
+    "RPM": "rev/min",
+    "Speed": "km/hr",
+    "CO": "%",
+    "HC": "ppm",
+    "CO2": "%",
+    "O2": "%",
+}
+ENGINE_FEATURE_TO_FULL_NAME = {
+    "MAP": "manifold absolute pressure",
+    "TPS": "throttle position sensor",
+    "CO": "carbon monoxide",
+    "HC": "hydrocarbons",
+    "CO2": "carbon dioxide",
+    "O2": "oxygen",
+    "Lambda": "air-fuel equivalence ratio",
+    "AFR": "air-fuel ratio",
+}
 
 
 # %%
@@ -45,6 +69,11 @@ class GlobalLogicExtractor:
 
         self.n_features = self.tmpls.shape[1]
         self.models = self._load_models()
+        self.stdsclr = skl_preproc.StandardScaler(copy=True).fit(
+            mydatasets.aaco.load_aaco_data("engine-fault", to_normalize=False)[0][
+                "xs"
+            ].numpy(force=True)
+        )  # type:ignore
 
         if feature_names:
             self.feature_names = feature_names[: self.n_features]
@@ -526,10 +555,19 @@ class GlobalLogicExtractor:
 
             cnt = sum(p["count"] for p in agg_paths)
             prob = (cnt / total_obs * 100) if total_obs else 0
-            names = [self.feature_names[i] for i in outcome]
+            # *NOTE *CHANGED: Enhanced feature display with full names and units**
+            # names = [self.feature_names[i] for i in outcome]
+
+            # report_lines.append(
+            #     f"\nACQUIRE (Size: {len(outcome)}): {{ {', '.join(names)} }} (Freq: {prob:.1f}%)"
+            # )
+            feature_displays = [
+                self._format_feature_display_name(self.feature_names[i])
+                for i in outcome
+            ]
 
             report_lines.append(
-                f"\nACQUIRE (Size: {len(outcome)}): {{ {', '.join(names)} }} (Freq: {prob:.1f}%)"
+                f"\nACQUIRE (Size: {len(outcome)}): {{ {', '.join(feature_displays)} }} (Freq: {prob:.1f}%)"
             )
             agg_paths.sort(key=lambda x: x["count"], reverse=True)
 
@@ -548,14 +586,38 @@ class GlobalLogicExtractor:
                         rng = intervals[f_idx]
                         min_v, max_v = rng[0], rng[1]
 
-                        if min_v > -float("inf") and max_v < float("inf"):
-                            rule_strs.append(f"{min_v:.4f} < {f_name} <= {max_v:.4f}")
+                        # NOTE **CHANGED: Apply inverse transformation to get original scale values**
+                        if min_v > -float("inf"):
+                            min_v_orig = self._inverse_transform_value(f_idx, min_v)
+                        else:
+                            min_v_orig = min_v
+
+                        if max_v < float("inf"):
+                            max_v_orig = self._inverse_transform_value(f_idx, max_v)
+                        else:
+                            max_v_orig = max_v
+
+                        # NOTE **CHANGED: Use original scale values in formatting**
+                        if min_v_orig > -float("inf") and max_v_orig < float("inf"):
+                            min_str = self._format_rule_value_with_unit(
+                                f_name, min_v_orig
+                            )
+                            max_str = self._format_rule_value_with_unit(
+                                f_name, max_v_orig
+                            )
+                            rule_strs.append(f"{min_str} < {f_name} <= {max_str}")
                         else:
                             parts = []
-                            if min_v > -float("inf"):
-                                parts.append(f"{f_name} > {min_v:.4f}")
-                            if max_v < float("inf"):
-                                parts.append(f"{f_name} <= {max_v:.4f}")
+                            if min_v_orig > -float("inf"):
+                                min_str = self._format_rule_value_with_unit(
+                                    f_name, min_v_orig
+                                )
+                                parts.append(f"{f_name} > {min_str}")
+                            if max_v_orig < float("inf"):
+                                max_str = self._format_rule_value_with_unit(
+                                    f_name, max_v_orig
+                                )
+                                parts.append(f"{f_name} <= {max_str}")
 
                             if parts:
                                 rule_strs.append(" AND ".join(parts))
@@ -569,6 +631,42 @@ class GlobalLogicExtractor:
                 report_lines.append(f"  Rule {i+1} ({p_prob:.1f}%): IF {rule_str}")
 
         return "\n".join(report_lines)
+
+    def _inverse_transform_value(self, feature_idx, standardized_value):
+        """Transform a single standardized value back to original scale"""
+        if np.isinf(standardized_value):
+            return standardized_value
+
+        # Create a dummy array with zeros for all features
+        dummy_array = np.zeros((1, self.n_features))
+        dummy_array[0, feature_idx] = standardized_value
+
+        # Apply inverse transform and return the specific feature value
+        original_array = self.stdsclr.inverse_transform(dummy_array)
+        return original_array[0, feature_idx]
+
+    def _format_feature_display_name(self, feature_name):
+        """Format feature name for display in ACQUIRE section"""
+        full_name = ENGINE_FEATURE_TO_FULL_NAME.get(feature_name)
+        unit = ENGINE_FEATURE_UNITS.get(feature_name)
+
+        if full_name and unit:
+            return f"{full_name} ({feature_name})[{unit}]"
+        elif full_name:
+            return f"{full_name} ({feature_name})"
+        elif unit:
+            return f"{feature_name}[{unit}]"
+        else:
+            return feature_name
+
+    def _format_rule_value_with_unit(self, feature_name, value):
+        """Format rule value with unit for display in rules"""
+        unit = ENGINE_FEATURE_UNITS.get(feature_name)
+
+        if unit:
+            return f"{value:.4f} {unit}"
+        else:
+            return f"{value:.4f}"
 
 
 # %%
@@ -739,7 +837,7 @@ def process_model(model_dir):
     else:
         dataset_folder_name = parts[0]
 
-    output_dir = os.path.join(os.getcwd(), dataset_folder_name)
+    output_dir = os.path.join(os.getcwd(), "outputs")
     os.makedirs(output_dir, exist_ok=True)
 
     output_path = os.path.join(output_dir, f"{exp_name}.txt")
