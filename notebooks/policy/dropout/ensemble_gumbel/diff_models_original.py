@@ -34,7 +34,7 @@ class SurrogateClassifier(nn.Module):
             self.net = nn.Sequential(
                 nn.Linear(input_dim * 2, hidden_dim),
                 nn.BatchNorm1d(hidden_dim),
-                nn.ReLU(),
+                nn.ELU(),
                 nn.Linear(hidden_dim, n_classes),
             )
         else:
@@ -101,7 +101,7 @@ class TemplatePolicy(nn.Module):
             self.net = nn.Sequential(
                 nn.Linear(input_dim * 2, hidden_dim),
                 nn.BatchNorm1d(hidden_dim),
-                nn.ReLU(),
+                nn.ELU(),
                 nn.Linear(hidden_dim, self.M),
             )
         else:
