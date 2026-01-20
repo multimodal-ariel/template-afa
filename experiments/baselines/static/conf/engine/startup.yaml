@@ -1,0 +1,21 @@
+hydra:
+  job:
+    name: engine
+  sweep:
+    dir: outputs/${hydra.job.name}/${now:%Y%m%d}_${now:%H%M%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    n_jobs: 8
+
+data:
+  _target_: mydatasets.aaco.load_aaco_data
+  name: engine-fault
+  to_normalize: false
+n_feats: 10 # TODO override this
+classifier:
+  _target_: sklearn.tree.DecisionTreeClassifier
+  max_depth: 8
+  splitter: "best"
+  criterion: "log_loss"
+  ccp_alpha: 0.025
+  random_state: 279
