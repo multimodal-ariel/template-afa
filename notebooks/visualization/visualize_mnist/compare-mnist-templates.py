@@ -47,7 +47,8 @@ to_vis_tids: list[int] = (
     th.sort(th.bincount(th.max(tpcomp["rwds"], dim=1).indices), descending=True)
     # .indices[:4]
     # .indices[[0, 3, 5, 7]]
-    .indices[[0, 2, 6]].tolist()
+    # .indices[[0, 2, 6]].tolist()
+    .indices[[0, 7, 6]].tolist()
 )
 
 # %%
@@ -133,8 +134,8 @@ for _tid, _tmpl_axs, _lbldists_axs, _top_axs, _top_idxs, _least_axs in zip(
             x=_pxl_locs[:, 1],
             y=_pxl_locs[:, 0],
             marker="s",
-            color="gold",
-            alpha=0.7,
+            color="yellow",
+            alpha=1.0,
             edgecolors="none",
         )
     # plot two least likely label
@@ -153,8 +154,8 @@ for _tid, _tmpl_axs, _lbldists_axs, _top_axs, _top_idxs, _least_axs in zip(
             x=_pxl_locs[:, 1],
             y=_pxl_locs[:, 0],
             marker="s",
-            color="gold",
-            alpha=0.7,
+            color="yellow",
+            alpha=1.0,
             edgecolors="none",
         )
 fig.savefig(
