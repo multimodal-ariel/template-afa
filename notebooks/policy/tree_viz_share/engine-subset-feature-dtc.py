@@ -183,5 +183,17 @@ plot_tree(
     ["MAP", "Consumption L/100KM", "CO"],
     os.path.join(_out_p, "map-lper100km-co"),
 )
+plot_tree(
+    clf,
+    [
+        "Force",
+        "RPM",
+        "Consumption L/100KM",
+        "Speed",
+        "CO",
+        "O2",
+    ],
+    os.path.join(_out_p, "force-rpm-lper100km-speed-co-o2"),
+)
 
 # %%
