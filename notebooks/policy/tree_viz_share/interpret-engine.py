@@ -17,6 +17,9 @@ import tqdm.auto as tqdm
 from omegaconf import OmegaConf
 from sklearn.tree import _tree as skl_tree_prtdtree
 
+OmegaConf.register_new_resolver(
+    name="get_cls", resolver=lambda cls: hd.utils.get_class(cls), replace=True, use_cache=True
+)
 # %%
 ENGINE_FEATURE_NAMES = [
     "MAP",
@@ -214,7 +217,7 @@ class GlobalLogicExtractor:
             {"rules": rules, "outcome": outcome_set, "count": 0}
         )
 
-    def validate_with_data(self, X_val):
+    def validate_with_data(self, X_val, y_val=None):
         print(f"[TAFA-Interp] Validating logic against {len(X_val)} samples...")
 
         if isinstance(X_val, pd.DataFrame):
@@ -236,6 +239,14 @@ class GlobalLogicExtractor:
                         matches &= col_data > rule["val"]
 
             path_data["count"] = int(matches.sum())
+
+            # NOTE Track class distributions if labels provided
+            if y_val is not None:
+                matched_labels = y_val[matches]
+                unique_labels, counts = np.unique(matched_labels, return_counts=True)
+                path_data["class_distribution"] = dict(zip(unique_labels, counts))
+            else:
+                path_data["class_distribution"] = {}
             matched_count += matches.sum()
 
         print(
@@ -444,6 +455,9 @@ class GlobalLogicExtractor:
                     "intervals": intervals,
                     "count": path["count"],
                     "outcome": path["outcome"],
+                    "class_distribution": path.get(
+                        "class_distribution", {}
+                    ),  # ADD THIS LINE
                 }
             )
 
@@ -501,6 +515,15 @@ class GlobalLogicExtractor:
                             new_range = [range_b[0], range_a[1]]
 
                         if new_range is not None:
+                            # NOTE Merge class distributions
+                            combined_class_dist = defaultdict(int)
+                            for dist in [
+                                path_a.get("class_distribution", {}),
+                                path_b.get("class_distribution", {}),
+                            ]:
+                                for cls, count in dist.items():
+                                    combined_class_dist[cls] += count
+
                             merged_intervals = path_a["intervals"].copy()
                             merged_intervals[f_diff] = new_range
 
@@ -508,6 +531,9 @@ class GlobalLogicExtractor:
                                 "intervals": merged_intervals,
                                 "count": path_a["count"] + path_b["count"],
                                 "outcome": path_a["outcome"],
+                                "class_distribution": dict(
+                                    combined_class_dist
+                                ),  # NOTE account for class distribution
                             }
 
                             next_pass_paths.append(new_path)
@@ -628,7 +654,24 @@ class GlobalLogicExtractor:
                         else "DEFAULT (Always True)"
                     )
 
-                report_lines.append(f"  Rule {i+1} ({p_prob:.1f}%): IF {rule_str}")
+                # report_lines.append(f"  Rule {i+1} ({p_prob:.1f}%): IF {rule_str}")
+                rule_line = f"  Rule {i+1} ({p_prob:.1f}%): IF {rule_str}"
+
+                # NOTE NEW: Add class distribution information
+                class_dist = path.get("class_distribution", {})
+                if class_dist:
+                    total_in_rule = sum(class_dist.values())
+                    class_info = []
+                    for cls in sorted(class_dist.keys()):
+                        count = class_dist[cls]
+                        percentage = (
+                            (count / total_in_rule * 100) if total_in_rule > 0 else 0
+                        )
+                        class_info.append(f"Class {cls}: {count} ({percentage:.1f}%)")
+
+                    rule_line += f"\n    Class Distribution: {' | '.join(class_info)}"
+
+                report_lines.append(rule_line)
 
         return "\n".join(report_lines)
 
@@ -741,7 +784,7 @@ def load_classifier(cfg, classifier_ckpt_path):
             return None
 
         # Instantiate using Hydra config
-        classifier = hd.utils.call(cfg.classifier)
+        classifier = hd.utils.call(cfg.tclassifier)
 
         # Load weights
         state_dict = th.load(classifier_ckpt_path, map_location="cpu")
@@ -775,7 +818,7 @@ def process_model(model_dir):
     tmpls_path = os.path.join(mktmpl_dir, "tmpls.pt")
     config_path = os.path.join(mktmpl_dir, ".hydra", "config.yaml")
     shuffle_idxs_path = os.path.join(mktmpl_dir, "tdata_shuffle_idxs.pt")
-    classifier_ckpt_path = os.path.join(mktmpl_dir, "classifier.pt")
+    classifier_ckpt_path = os.path.join(mktmpl_dir, "tclassifier.pt")
 
     if not os.path.exists(config_path):
         print(f"[Skip] Config file not found at {config_path}")
@@ -812,7 +855,7 @@ def process_model(model_dir):
     X_val, y_val = load_real_training_data(cfg, shuffle_idxs_path)
 
     # validate
-    interpreter.validate_with_data(X_val)
+    interpreter.validate_with_data(X_val, y_val)
     interpreter.verify_consistency(X_val, init_fidx)
 
     # eval
