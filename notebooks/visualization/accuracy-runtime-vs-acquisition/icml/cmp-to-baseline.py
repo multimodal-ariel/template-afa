@@ -1,18 +1,20 @@
 # %%
 from __future__ import annotations
 
+import argparse
 import itertools as itrtls
 import logging as lgr
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 import hydra as hd
 import matplotlib.pyplot as plt
 import mylib
 import numpy as np
 import pandas as pd
+import torch as th
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import FormatStrFormatter
@@ -77,14 +79,15 @@ cfgkey_to_plot_kwargs = {
     #     "marker": ".",
     #     "markersize": 6,
     # },
-    # "tafa-gumbel": {
-    #     "color": "red",
-    #     "alpha": 0.8,
-    #     "marker": ".",
-    #     "markersize": 6,
-    # },
+    "tafa-gumbel": {
+        "color": "darkred",
+        "alpha": 0.5,
+        "marker": ".",
+        "markersize": 10,
+        "linewidth": 3,
+    },
     "tafa-interp.": {
-        "color": "g",
+        "color": "crimson",
         "alpha": 0.5,
         "marker": ".",
         "markersize": 10,
@@ -898,6 +901,33 @@ runtimes_dl = [
     )
     for _expcfg in pltcfg.expcfgs
 ]
+
+
+# %%
+def to_namespace_recursive(d: Mapping["str", Any]) -> argparse.Namespace:
+    out_d = dict()
+    for _k, _v in d.items():
+        if isinstance(_v, Mapping):
+            _v = to_namespace_recursive(_v)
+        elif (
+            isinstance(_v, Iterable)
+            and not isinstance(_v, str)
+            and all(map(lambda _o: isinstance(_o, Mapping), _v))
+        ):
+            _v = list(map(to_namespace_recursive, _v))
+        out_d[_k] = _v
+    out = argparse.Namespace(**out_d)
+    return out
+
+
+th.save(
+    {
+        "metrics_dl": metrics_dl,
+        "runtimes_dl": runtimes_dl,
+        "pltcfg": to_namespace_recursive(OmegaConf.to_container(pltcfg)),
+    },
+    os.path.join("outputs", "baseline_metrics.pt"),
+)
 
 # %%
 fig, axs, line_set, label_set, metrics_dl, runtimes_dl = make_plots(
