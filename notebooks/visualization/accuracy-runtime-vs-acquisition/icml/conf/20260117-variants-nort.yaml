@@ -6,10 +6,10 @@ expcfgs: [
       exp_ps: {
           # "tafa": "experiments/make_template/outputs/big5_cnnet/20260106_181338",
           "tafa-gumbel-knn": "notebooks/policy/dropout/ensemble_gumbel/outputs/big5/20260116_143133/0",
-          "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_big5.csv",
-          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/big5_runtime/20250801_030529",
-          "tafa-gumbel-random": "notebooks/visualization/accuracy-runtime-vs-acquisition/gumbel-random/results_ablation_big5.csv",
           "tafa": "experiments/make_template/outputs/big5_cnnet/20251213_024429",
+          "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_big5.csv",
+          "tafa-gumbel-random": "notebooks/visualization/accuracy-runtime-vs-acquisition/gumbel-random/results_ablation_big5.csv",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/big5_runtime/20250801_030529",
           # "aco": "experiments/baselines/aco/outputs/big5/20260118_215117",
           # "sefa": "notebooks/visualization/accuracy-runtime-vs-acquisition/sefa-timing/timing_big5.csv",
           # "dime": "experiments/baselines/dime/outputs/big5_eval/20250319_144337",
@@ -33,42 +33,6 @@ expcfgs: [
       ylim_row0: [0.6, 1.03],
     },
     # xlim: [0.0, 13], ylim_row0: [0.37, 1.0] },
-    {
-      subtitle: cube,
-      exp_ps: {
-          # "tafa": "experiments/make_template/outputs/cube-linear/20260105_224230",
-          # "tafa": "experiments/make_template/outputs/cube/20250318_225416",  # naive bayes
-          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251211_165819", # subset feature classifier
-          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251225_225013", # subset feature classifier no max_features
-          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251226_225342",
-          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251212_182000",  # nnet-random-subset
-          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/cube_runtime/20250801_030719",
-          # "aco": "experiments/baselines/aco/outputs/cube/20250311_201540",  # naive bayes
-          # "aco": "experiments/baselines/aco/outputs/cube-cnnet/20251214_172518", # nnet subset feature classifier
-          "tafa-gumbel-knn": "notebooks/policy/dropout/ensemble_gumbel/outputs/cube/20260110_184230/0",
-          "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_cube.csv",
-          "tafa-gumbel-random": "notebooks/visualization/accuracy-runtime-vs-acquisition/gumbel-random/results_ablation_cube.csv",
-          "tafa": "experiments/make_template/outputs/cube-linear/20260105_232445",
-          # "aco": "experiments/baselines/aco/outputs/cube-cnnet/20260105_194051",
-          # "sefa": "notebooks/visualization/accuracy-runtime-vs-acquisition/sefa-timing/timing_cube.csv",
-          # "dime": "experiments/baselines/dime/outputs/cube_eval/20250323_223212",
-          # "jafa": "experiments/baselines/jafa/outputs/cube/20250330_211151",
-          # "static": "experiments/baselines/static/outputs/cube/20250330_205003",
-        },
-      runtime_ps: {
-          "tafa": "experiments/make_template/outputs/cube_runtime/20250729_025023",
-          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/cube_runtime/20250801_030719",
-          "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_cube.csv",
-          "tafa-gumbel-knn": "notebooks/policy/dropout/ensemble_gumbel/outputs/cube/20260110_184230/0",
-          # "aco": "experiments/baselines/aco/outputs/cube_runtime/20250728_121935",
-          # "dime": "experiments/baselines/dime/outputs/cube_runtime/20250724_213239",
-          # "jafa": "experiments/baselines/jafa/outputs/gas_runtime/20250727_215706",
-          # "sefa": "notebooks/visualization/accuracy-runtime-vs-acquisition/sefa-timing/timing_cube.csv",
-        },
-      #
-      xlim: [4, 7],
-      ylim_row0: [0.7, 0.90],
-    },
     {
       subtitle: gas,
       exp_ps: {
@@ -127,7 +91,44 @@ expcfgs: [
       ylim_row0: [.85, null],
     },
     {
-      subtitle: mnist-ds,
+      subtitle: cube,
+      exp_ps: {
+          # "tafa": "experiments/make_template/outputs/cube-linear/20260105_224230",
+          # "tafa": "experiments/make_template/outputs/cube/20250318_225416",  # naive bayes
+          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251211_165819", # subset feature classifier
+          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251225_225013", # subset feature classifier no max_features
+          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251226_225342",
+          # "tafa": "experiments/make_template/outputs/cube-cnnet/20251212_182000",  # nnet-random-subset
+          "tafa-dagger-dtc1": notebooks/visualization/accuracy-runtime-vs-acquisition/tafa-interp-1/cube.csv,
+          # "aco": "experiments/baselines/aco/outputs/cube/20250311_201540",  # naive bayes
+          # "aco": "experiments/baselines/aco/outputs/cube-cnnet/20251214_172518", # nnet subset feature classifier
+          "tafa-gumbel-knn": "notebooks/policy/dropout/ensemble_gumbel/outputs/cube/20260110_184230/0",
+          "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_cube.csv",
+          "tafa-gumbel-random": "notebooks/visualization/accuracy-runtime-vs-acquisition/gumbel-random/results_ablation_cube.csv",
+          "tafa": "experiments/make_template/outputs/cube-linear/20260105_232445",
+          # "aco": "experiments/baselines/aco/outputs/cube-cnnet/20260105_194051",
+          # "sefa": "notebooks/visualization/accuracy-runtime-vs-acquisition/sefa-timing/timing_cube.csv",
+          # "dime": "experiments/baselines/dime/outputs/cube_eval/20250323_223212",
+          # "jafa": "experiments/baselines/jafa/outputs/cube/20250330_211151",
+          # "static": "experiments/baselines/static/outputs/cube/20250330_205003",
+        },
+      runtime_ps: {
+          "tafa": "experiments/make_template/outputs/cube_runtime/20250729_025023",
+          "tafa-dagger-dtc": "notebooks/_dzung/_timing/outputs/cube_runtime/20250801_030719",
+          "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_cube.csv",
+          "tafa-gumbel-knn": "notebooks/policy/dropout/ensemble_gumbel/outputs/cube/20260110_184230/0",
+          # "aco": "experiments/baselines/aco/outputs/cube_runtime/20250728_121935",
+          # "dime": "experiments/baselines/dime/outputs/cube_runtime/20250724_213239",
+          # "jafa": "experiments/baselines/jafa/outputs/gas_runtime/20250727_215706",
+          # "sefa": "notebooks/visualization/accuracy-runtime-vs-acquisition/sefa-timing/timing_cube.csv",
+        },
+      #
+      xlim: [4, 7],
+      ylim_row0: [0.7, 0.90],
+    },
+
+    {
+      subtitle: mnist,
       exp_ps: {
           "tafa-gumbel-knn": "notebooks/policy/dropout/ensemble_gumbel/outputs/mnist/17-42-14",
           "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_mnist.csv",
@@ -156,12 +157,13 @@ expcfgs: [
       ylim_row0: [.85, .95],
     },
     {
-      subtitle: fashion-ds,
+      subtitle: fashion,
       exp_ps: {
           "tafa": "experiments/make_template/outputs/fashion-16x16_cnnet/20260102_202634",
           "tafa-gumbel": "notebooks/policy/dropout/ensemble_gumbel/results/timing_final_fashion.csv",
           "tafa-gumbel-knn": "notebooks/policy/dropout/ensemble_gumbel/outputs/fashion-16x16/20260110_185602/0",
           "tafa-gumbel-random": "notebooks/visualization/accuracy-runtime-vs-acquisition/gumbel-random/results_ablation_fashion.csv",
+          "tafa-dagger-dtc1": "notebooks/visualization/accuracy-runtime-vs-acquisition/tafa-interp-1/fashion.csv",
           # "aco": "experiments/baselines/aco/outputs/fashion-16x16/20251214_174622",
           # "sefa": "notebooks/visualization/accuracy-runtime-vs-acquisition/sefa-timing/timing_fashion_small.csv",
           # "dime": "experiments/baselines/dime/outputs/fashion-16x16-eval/20251213_231345",

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import itertools as itrtls
 import logging as lgr
 import os
 from collections import defaultdict
@@ -17,7 +16,6 @@ import pandas as pd
 import torch as th
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.ticker import FormatStrFormatter
 from omegaconf import OmegaConf
 
 OmegaConf.register_new_resolver(
@@ -66,11 +64,12 @@ method_to_cfgkey = {
 }
 cfgkey_to_plot_kwargs = {
     "tafa-gumbel-knn": {
-        "label": "tafa",
-        "color": "r",
-        "alpha": 0.5,
+        "label": "tafa-knn",
+        "color": "cyan",
+        "alpha": 0.95,
         "marker": ".",
-        "markersize": 10,
+        "markersize": 6,
+        # "linestyle": ":",
         "linewidth": 3,
     },
     # "tafa-knn": {
@@ -80,52 +79,61 @@ cfgkey_to_plot_kwargs = {
     #     "markersize": 6,
     # },
     "tafa-gumbel": {
-        "color": "darkred",
-        "alpha": 0.5,
+        "label": "tafa-actor",
+        "color": "navy",
+        "alpha": 0.95,
+        "marker": ".",
+        "markersize": 6,
+        "linewidth": 3,
+    },
+    "tafa-gumbel-random": {
+        "color": "orangered",
+        "alpha": 0.95,
         "marker": ".",
         "markersize": 10,
         "linewidth": 3,
     },
     "tafa-interp.": {
-        "color": "crimson",
-        "alpha": 0.5,
+        "color": "slategray",
+        "alpha": 0.95,
         "marker": ".",
-        "markersize": 10,
+        "linestyle": ":",
+        "markersize": 6,
         "linewidth": 3,
     },
     "aco": {
-        "color": "b",
-        "alpha": 0.5,
+        "color": "tab:orange",
+        "alpha": 0.95,
         "marker": ".",
-        "markersize": 10,
+        "markersize": 6,
         "linewidth": 3,
     },
     "dime": {
-        "color": "y",
-        "alpha": 0.5,
+        "color": "tab:green",
+        "alpha": 0.95,
         "marker": ".",
-        "markersize": 10,
+        "markersize": 6,
         "linewidth": 3,
     },
     "jafa": {
-        "color": "m",
-        "alpha": 0.5,
+        "color": "tab:purple",
+        "alpha": 0.95,
         "marker": ".",
-        "markersize": 10,
+        "markersize": 6,
         "linewidth": 3,
     },
     "sefa": {
-        "color": "c",
-        "alpha": 0.5,
+        "color": "tab:red",
+        "alpha": 0.95,
         "marker": ".",
-        "markersize": 10,
+        "markersize": 6,
         "linewidth": 3,
     },
     "static": {
-        "color": "darkorange",
-        "alpha": 0.5,
+        "color": "tab:olive",
+        "alpha": 0.95,
         "marker": ".",
-        "markersize": 10,
+        "markersize": 6,
         "linewidth": 3,
     },
 }
@@ -353,6 +361,16 @@ def load_sefa_metrics(csv_path: str) -> dict[str, list[pd.DataFrame]]:
         return {"sefa": []}
 
 
+def load_tafa_dagger_dtc1_metrics(csv_path: str) -> dict[str, list[pd.DataFrame]]:
+    full_path = os.path.join(mylib.utils.get_project_root_dir(), csv_path)
+    df = pd.read_csv(full_path)
+    # Map columns to expected format
+    df_formatted = pd.DataFrame(
+        {"eval/feature observed": df["cost"], "eval/acc": df["accuracy"]}
+    )
+    return {"tafa-interp.": [df_formatted]}
+
+
 def load_tafa_gumbel_metrics(csv_path: str) -> dict[str, list[pd.DataFrame]]:
     """Load Gumbel dropout ensemble results from CSV file."""
     full_path = os.path.join(mylib.utils.get_project_root_dir(), csv_path)
@@ -362,6 +380,17 @@ def load_tafa_gumbel_metrics(csv_path: str) -> dict[str, list[pd.DataFrame]]:
         {"eval/feature observed": df["test_cost"], "eval/acc": df["test_acc"]}
     )
     return {"tafa-gumbel": [df_formatted]}
+
+
+def load_tafa_gumbel_random_metrics(csv_path: str) -> dict[str, list[pd.DataFrame]]:
+    """Load Gumbel dropout ensemble results from CSV file."""
+    full_path = os.path.join(mylib.utils.get_project_root_dir(), csv_path)
+    df = pd.read_csv(full_path)
+    # Map columns to expected format
+    df_formatted = pd.DataFrame(
+        {"eval/feature observed": df["Test_Cost"], "eval/acc": df["Test_Accuracy"]}
+    )
+    return {"tafa-gumbel-random": [df_formatted]}
 
 
 def load_tafa_gumbel_knn_metrics(exp_p: str) -> list[pd.DataFrame]:
@@ -417,6 +446,10 @@ def load_metrics(
                 exp_p, _exclude_mktmplfn_name
             ).items():
                 metrics_d[method_to_cfgkey[f"tafa-dagger-dtc-{_name}"]] = _metrics_l
+        elif name == "tafa-dagger-dtc1":
+            _rsts = load_tafa_dagger_dtc1_metrics(exp_p)
+            for method_name, metrics_list in _rsts.items():
+                metrics_d[method_name] = metrics_list
         elif name == "tafa-dropout":
             _exclude_mktmplfn_name = (
                 load_kwargs["tafa-dagger"]["exclude_mktmplfn_name"]
@@ -440,6 +473,11 @@ def load_metrics(
         elif name == "tafa-gumbel":
             # NOTE exp_p is now the CSV path
             gumbel_results = load_tafa_gumbel_metrics(exp_p)
+            for method_name, metrics_list in gumbel_results.items():
+                metrics_d[method_name] = metrics_list
+        elif name == "tafa-gumbel-random":
+            # NOTE exp_p is now the CSV path
+            gumbel_results = load_tafa_gumbel_random_metrics(exp_p)
             for method_name, metrics_list in gumbel_results.items():
                 metrics_d[method_name] = metrics_list
         elif name == "tafa-gumbel-knn":
@@ -933,21 +971,23 @@ th.save(
 fig, axs, line_set, label_set, metrics_dl, runtimes_dl = make_plots(
     pltcfg=pltcfg, metrics_dl=metrics_dl, runtimes_dl=runtimes_dl
 )
-fig.set_figheight(1.75 * 2.0 + 0.667 * max(len(label_set) // 4 - 1, 0) + 0.6)
+fig.set_figheight(1.75 * 2.0 + 0.667 * max(len(label_set) // 4 - 1, 0))
 fig.set_figwidth(1.85 * len(axs[0]))
 if pltcfg.title is not None:
     fig.suptitle(pltcfg.title)
 fig.supxlabel("number of features acquired\n", fontsize=19)
 # fig.supylabel(keys_to_ylabel[pltcfg.key])
 axs[0][0].set_ylabel(lgrkeys_to_ylabel[pltcfg.key], fontsize=19)
-axs[1][0].set_ylabel("eval time[s]", fontsize=19)
+axs[1][0].set_ylabel(r"$\mathrm{log}\left( \text{runtime} \right)$", fontsize=19)
 fig.legend(
     list(reversed(line_set)),
     list(reversed(label_set)),
     loc="outside lower center",
     frameon=False,
-    ncol=10,
-    # ncol=6,
+    bbox_to_anchor=(0.5, -0.15),
+    # ncol=10,
+    # ncol=10,
+    ncol=4,
     fontsize=17,
     # borderaxespad=1.0,
     # borderaxespad=0.18,
