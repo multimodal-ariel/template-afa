@@ -1,0 +1,9 @@
+num_leaf,rewards,method
+128,-0.758,ensemble
+190,-0.7411,ensemble
+256,-0.7009,ensemble
+64,-0.9142,single_tree
+128,-0.9057,single_tree
+256,-0.9066,single_tree
+132,-0.7751,action_feature
+196,-0.7877,action_feature

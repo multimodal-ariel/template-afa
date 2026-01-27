@@ -1,0 +1,15 @@
+num_leaf,rewards,method
+12,-1.3703,ensemble
+17,-1.3703,ensemble
+22,-1.3601,ensemble
+27,-1.3533,ensemble
+32,-1.3533,ensemble
+11,-1.3703,single_tree
+12,-1.3703,single_tree
+16,-1.3601,single_tree
+24,-1.3533,single_tree
+12,-2.7409,action_feature
+17,-2.7409,action_feature
+18,-2.7409,action_feature
+25,-2.7409,action_feature
+29,-2.7409,action_feature
