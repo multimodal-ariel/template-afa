@@ -621,6 +621,168 @@ def make_templates_fix_rounds(
 
 
 @th.no_grad()
+def make_templates_fix_rounds_with_missing_feature(
+    tdata: thd.TensorDict,
+    missing_value: float,
+    max_tdata: Optional[int],
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    to_update_classifier: bool,
+    init_fidx: Optional[int | _PostHocIdentifyInitialFeatureFunc],
+    n_tmpls_targ: int,
+    n_cands_init: int,
+    n_cands_mutate: int | None,
+    n_cands_targ: int | None,
+    min_features: int,
+    max_features: Optional[int],
+    n_rounds: int,
+    use_feature_importance_sampling: bool,
+    lmbda: float,
+    bsz: int,
+    plf: pl.Fabric,
+    generator: Optional[th.Generator] = None,
+) -> th.Tensor:
+    """make templates using mutate greedy search
+
+    Args:
+        tdata (thd.TensorDict): (n, ) training data
+        max_tdata (Optional[int]): optional maximum training data to subsample if training data is too large and takes too long to complete
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier to use
+        to_update_classifier (bool): _descriptto update subset feature classifier when a new collection of templates is generated and before the final collection of templates is found.
+        init_fidx (int): initial feature index
+        n_tmpls_targ (int): number of templates to return
+        n_cands_init (int): initial candidate size
+        n_cands_mutate (int | None): after initial search, number of candidates coming from mutating previous round templates; set to `n_tmpls_targ` if `None`
+        n_cands_targ (int | None): after initial search, number of toal amount of candidates; set to `5 * n_tmpls_targ` if `None`.
+        min_features (int): minimum number of features to include in each template; must be greater than 1.
+        max_features (Optional[int]): maximum number of features to include in each template; if `None`, `n_covs` is used.
+        n_rounds (int): number of mutative greedy search
+        use_feature_importance_sampling (bool): use feautre frequencies from previous round identified templates to sample candidates for next round of search.
+        lmbda (float): penalty term for choosing more features.
+        bsz (int): batch size for evaluating candidates
+        plf (pl.Fabric): lightning fabric instance
+
+    Returns:
+        th.Tensor: (n_tmpls, n_covs)
+    """
+    generator = th.default_generator if generator is None else generator
+    classifier.eval().to(device=plf.device)
+    n_covs: int = classifier.n_covs
+    max_features = n_covs if max_features is None else max_features
+    ctmpls: th.Tensor | None = None
+    tmpls: th.Tensor | None = None
+    slctd_ms: th.Tensor | None = None
+    for _i in tqdm.trange(
+        n_rounds, desc="mktmpl fix rounds", leave=False, dynamic_ncols=True
+    ):
+        if ctmpls is None or tmpls is None or slctd_ms is None:
+            # initialize candidate pool
+            ctmpls = (
+                tafalib_makers_candidates.make_template_candidates(
+                    n_covs=n_covs,
+                    init_fidx=init_fidx,
+                    n_cands_targ=n_cands_init,
+                    min_features=min_features,
+                    max_features=max_features,
+                    generator=generator,
+                )
+                if init_fidx is not None and isinstance(init_fidx, int)
+                else tafalib_makers_candidates.make_feature_masks(
+                    n_covs=n_covs,
+                    n_masks=n_cands_init,
+                    min_features=1,
+                    max_features=max_features,
+                    generator=generator,
+                )
+            )
+        else:
+            # update candidate pool from existing templates
+            ctmpls = _update_template_candidates_fix_rounds(
+                ctmpls=ctmpls,
+                slctd_ms=slctd_ms,
+                init_fidx=init_fidx,
+                n_cands_init=n_cands_init,
+                n_cands_mutate=n_cands_mutate,
+                n_cands_targ=n_cands_targ,
+                min_features=min_features,
+                max_features=max_features,
+                use_feature_importance_sampling=use_feature_importance_sampling,
+                generator=generator,
+            )
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
+            classifier.fit_(ctmpls)
+        tpcomp: thd.TensorDict = (
+            tafalib_utils.precomp_rwds_for_tmpls_with_missing_feature(
+                ctmpls,
+                data=(
+                    tdata[
+                        th.multinomial(
+                            th.ones((len(tdata),)),
+                            num_samples=max_tdata,
+                            generator=generator,
+                        )
+                    ]
+                    if max_tdata is not None and max_tdata < len(tdata)
+                    else tdata
+                ),
+                missing_value=missing_value,
+                classifier=classifier,
+                lmbda=lmbda,
+                bsz=bsz,
+                plf=plf,
+            )
+        )
+        tmpls, slctd_ms = make_templates_from_candidates(
+            tpcomp=tpcomp,
+            ctmpls=ctmpls,
+            n_tmpls=n_tmpls_targ,
+            plf=plf,
+            log_prefix=f"fixrounds_mktmpl{_i}",
+        )
+        if (
+            isinstance(classifier, mymodels.classifiers.SubsetFeatureConcatClassifier)
+            and to_update_classifier
+        ):
+            classifier.fit_(tmpls)
+    assert tmpls is not None
+    tpcomp: thd.TensorDict = tafalib_utils.precomp_rwds_for_tmpls_with_missing_feature(
+        tmpls,
+        data=(
+            tdata[
+                th.multinomial(
+                    th.ones((len(tdata),)),
+                    num_samples=max_tdata,
+                    generator=generator,
+                )
+            ]
+            if max_tdata is not None and max_tdata < len(tdata)
+            else tdata
+        ),
+        missing_value=missing_value,
+        classifier=classifier,
+        lmbda=lmbda,
+        bsz=bsz,
+        plf=plf,
+    ).auto_batch_size_(2)
+    if init_fidx is None:
+        init_fidx = post_hoc_count_based_identify_init_fidx
+    if not isinstance(init_fidx, int):
+        fidx = init_fidx(
+            tdata=tdata,
+            tmpls=tmpls,
+            tpcomp=tpcomp,
+            classifier=classifier,
+            lmbda=lmbda,
+            bsz=bsz,
+            plf=plf,
+        )[0]
+        tmpls[:, fidx] = 1
+    return tmpls
+
+
+@th.no_grad()
 def make_templates_mutate_crossover(
     tdata: thd.TensorDict,
     max_tdata: Optional[int],

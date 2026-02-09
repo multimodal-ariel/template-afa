@@ -82,6 +82,75 @@ def precomp_rwds_for_tmpls(
 
 
 @th.no_grad()
+def precomp_rwds_for_tmpls_with_missing_feature(
+    tmpls: th.Tensor,
+    data: thd.TensorDict,
+    missing_value: float,
+    classifier: mymodels.classifiers.SubsetFeatureClassifier,
+    lmbda: float,
+    bsz: int,
+    plf: pl.Fabric,
+) -> thd.TensorDict:
+    """precompute rewards rewards for using templates over passed in dataset.
+
+    Args:
+        tmpls (th.Tensor): (n_tmpls, n_covs) set of templates
+        data (thd.TensorDict): (n, ) dataset of interest; must contain key `xs` and `ys`
+        classifier (mymodels.classifiers.SubsetFeatureClassifier): a subset feature classifier
+        lmbda (float): coefficient for feature cost
+        bsz (int): batch size
+        plf (pl.Fabric): lightning fabric instance
+
+    Returns::
+        thd.TensorDict: a TensorDict have same length as data containing following keys
+            `pyhats`: predicted class probability (n, n_tmpls, n_labels)
+            `cels`: (n, n_tmpls) cross entropy loss of each instance
+            `rwds`: (n, n_tmpls) rewards of each instance
+    """
+    classifier.eval().to(device=plf.device)
+    txs: th.Tensor = data["xs"]
+    tys: th.Tensor = data["ys"]
+    n_cands: int = len(tmpls)
+    n_labels: int = len(th.unique(tys))
+    # (n_data,  n_cands, n_labels)
+    pyhats: th.Tensor = th.empty((len(txs), n_cands, n_labels), dtype=th.float32)
+    # (n_data,  n_cands)
+    cels: th.Tensor = th.empty((len(txs), n_cands), dtype=th.float32)
+    rwds: th.Tensor = th.empty_like(cels)
+    # loop over dataset using flattened indices tensor splitted with bsz
+    pbar = tqdm.tqdm(
+        th.split(th.cartesian_prod(th.arange(len(data)), th.arange(n_cands)), bsz),
+        desc="precomp candidates",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    for _bidxs in pbar:
+        # (_bsz, n_covs)
+        _btxs: th.Tensor = txs[_bidxs[:, 0], :]
+        _bacts: th.Tensor = th.where(
+            _btxs == missing_value, 0, tmpls[_bidxs[:, 1], :]
+        ).to(device=plf.device)
+        _bctxs = _btxs.to(device=plf.device) * _bacts
+        # (_bsz, n_labels)
+        _bpyhats: th.Tensor = classifier.predict_proba(_bctxs, _bacts)
+        # (_bsz, )
+        _bcels: th.Tensor = th.nn.functional.nll_loss(
+            th.log(_bpyhats), tys[_bidxs[:, 0]].to(device=plf.device), reduction="none"
+        )
+        _brwds: th.Tensor = -_bcels - lmbda * th.sum(_bacts, dim=1)
+        # set it back to result tensor
+        pyhats[_bidxs[:, 0], _bidxs[:, 1], :] = _bpyhats.to(device="cpu")
+        cels[_bidxs[:, 0], _bidxs[:, 1]] = _bcels.to(device="cpu")
+        rwds[_bidxs[:, 0], _bidxs[:, 1]] = _brwds.to(device="cpu")
+    pbar.close()
+    # turn into tensordict
+    tpcomp = thd.TensorDict(
+        {"pyhats": pyhats, "cels": cels, "rwds": rwds}
+    ).auto_batch_size_(1)
+    return tpcomp
+
+
+@th.no_grad()
 def run_one_episode(
     x: th.Tensor,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
@@ -312,11 +381,11 @@ def predict(
 @th.no_grad()
 def run_one_episode_all_obsd_with_missing_feature(
     x: th.Tensor,
+    missing_value: float,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     cost_est: Callable[[th.Tensor], th.Tensor],
     init_fidx: int,
     tmpls: th.Tensor,
-    missing_value: float,
     plf: pl.Fabric,
 ) -> tuple[th.Tensor, list[int], tuple[int, ...]]:
     """run one episode using **all** features acquired
@@ -376,11 +445,11 @@ def run_one_episode_all_obsd_with_missing_feature(
 
 def evaluate_with_missing_feature(
     data: thd.TensorDict,
+    missing_value: float,
     classifier: mymodels.classifiers.SubsetFeatureClassifier,
     cost_est: Callable[[th.Tensor], th.Tensor],
     init_fidx: int,
     tmpls: th.Tensor,
-    missing_value: float,
     lmbda: float,
     metrics_func: thm.MetricCollection,
     plf: pl.Fabric,
