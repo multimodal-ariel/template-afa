@@ -132,6 +132,7 @@ def main(cfg: MainConf):
         init_fidx = hd.utils.instantiate(cfg.init_fidx, _partial_=True)
     tmpls: th.Tensor = make_templates_fn(
         tdata=tdata,
+        missing_value=cfg.missing_value,
         classifier=tclassifier,
         init_fidx=init_fidx,
         lmbda=cfg.lmbda,
@@ -146,9 +147,10 @@ def main(cfg: MainConf):
     if len(tclassifier.state_dict()) != 0:
         th.save(tclassifier.state_dict(), os.path.join(output_dir, "tclassifier.pt"))
     # evaluate validation set performance
-    tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls(
+    tpcomp: thd.TensorDict = tafalib.utils.precomp_rwds_for_tmpls_with_missing_feature(
         tmpls=tmpls,
         data=tdata,
+        missing_value=cfg.missing_value,
         classifier=tclassifier,
         lmbda=cfg.lmbda,
         bsz=cfg.bsz,
