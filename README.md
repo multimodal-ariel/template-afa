@@ -1,3 +1,7 @@
+# Information Templates: A New Paradigm for Intelligent Active Feature Acquisition
+
+Code for the Information Templates: A New Paradigm for Intelligent Active Feature Acquisition paper. 
+
 ```shell
 $ conda create -n tmplafa python=3.13
 $ conda activate tmplafa
